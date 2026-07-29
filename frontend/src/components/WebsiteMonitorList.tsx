@@ -50,7 +50,7 @@ type DashboardBackgroundSettings = {
 
 const DEFAULT_DASHBOARD_BACKGROUND: DashboardBackgroundSettings = {
   enabled: true,
-  image: '/preview-bg.png',
+  image: '/dashboard-background.jpg',
   overlay: 0.3,
   blur: 0,
   position: 'center',

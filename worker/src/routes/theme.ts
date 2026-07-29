@@ -53,7 +53,7 @@ const DASHBOARD_BACKGROUND_CONFIGURATION: ThemeConfigItem[] = [
     key: 'dashboardBackgroundImage',
     name: '背景图片',
     type: 'image',
-    default: '/preview-bg.png',
+    default: '/dashboard-background.jpg',
     help: '支持 HTTPS 外部 URL 或 /api/theme/assets/... 主题资源路径',
   },
   { key: 'dashboardBackgroundOverlay', name: '遮罩强度', type: 'range', min: 0, max: 0.8, step: 0.05, default: 0.3 },

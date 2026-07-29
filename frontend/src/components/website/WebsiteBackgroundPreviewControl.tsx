@@ -27,12 +27,12 @@ export default function WebsiteBackgroundPreviewControl({
       />
       <button type="button" onClick={() => inputRef.current?.click()}>
         <ImagePlus size={14} aria-hidden="true" />
-        更换背景
+        临时预览背景
       </button>
       {customized && (
-        <button type="button" className="is-reset" onClick={onReset} title="恢复默认预览背景">
+        <button type="button" className="is-reset" onClick={onReset} title="恢复已保存的背景">
           <RotateCcw size={14} aria-hidden="true" />
-          <span className="website-background-reset-label">恢复默认</span>
+          <span className="website-background-reset-label">恢复已保存背景</span>
         </button>
       )}
     </div>
