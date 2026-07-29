@@ -1,7 +1,17 @@
-import { useMemo, useRef } from 'react';
-import { Box, Flex, SegmentedControl, Text } from '@radix-ui/themes';
-import { ExternalLink } from 'lucide-react';
-import WebsiteHeartbeatBar, { WebsiteHeartbeatPoint } from './WebsiteHeartbeatBar';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { SegmentedControl } from '@radix-ui/themes';
+import type { WebsiteHeartbeatPoint } from './WebsiteHeartbeatBar';
+import WebsiteAssetDetails from './website/WebsiteAssetDetails';
+import WebsiteAssetFilters from './website/WebsiteAssetFilters';
+import WebsiteAssetGrid from './website/WebsiteAssetGrid';
+import type { WebsiteAssetViewModel } from './website/WebsiteAssetCard';
+import WebsiteBackgroundPreviewControl from './website/WebsiteBackgroundPreviewControl';
+import { fetchPublicSettings } from '../utils/publicSettings';
+import {
+  metadataForMonitor,
+  type WebsiteAssetCategory,
+} from './website/websiteAssetTypes';
+import './website/website-assets.css';
 
 export type WebsiteMonitorStatus = 'pending' | 'up' | 'down' | 'paused';
 const DEFAULT_WEBSITE_INTERVAL_SEC = 120;
@@ -18,36 +28,75 @@ export interface WebsiteMonitorSummary {
   last_latency_ms: number | null;
   last_effective_reason?: string | null;
   hidden?: boolean;
+  description: string;
+  category: string;
+  tags: string[];
+  icon: string;
+  server_uuid: string | null;
+  domain: string;
+  deployment: string;
+  repository_url: string;
   checks: WebsiteHeartbeatPoint[];
 }
 
-function statusText(status: WebsiteMonitorStatus) {
-  if (status === 'up') return '正常';
-  if (status === 'down') return '失效';
-  if (status === 'paused') return '暂停';
-  return '等待';
+type DashboardBackgroundSettings = {
+  enabled: boolean;
+  image: string;
+  overlay: number;
+  blur: number;
+  position: 'center' | 'top' | 'bottom';
+  size: 'cover' | 'contain' | 'auto';
+};
+
+const DEFAULT_DASHBOARD_BACKGROUND: DashboardBackgroundSettings = {
+  enabled: true,
+  image: '/preview-bg.png',
+  overlay: 0.3,
+  blur: 0,
+  position: 'center',
+  size: 'cover',
+};
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
+}
+
+function safeBackgroundImage(value: unknown) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return '';
+  if (raw.startsWith('/') && !raw.startsWith('//')) return raw;
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (url.protocol === 'https:' || (url.protocol === 'http:' && window.location.protocol === 'http:')) {
+      return url.toString();
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+function normalizeDashboardBackground(config: Record<string, unknown>): DashboardBackgroundSettings {
+  const position = config.dashboardBackgroundPosition;
+  const size = config.dashboardBackgroundSize;
+  return {
+    enabled: typeof config.dashboardBackgroundEnabled === 'boolean'
+      ? config.dashboardBackgroundEnabled
+      : DEFAULT_DASHBOARD_BACKGROUND.enabled,
+    image: safeBackgroundImage(config.dashboardBackgroundImage) || DEFAULT_DASHBOARD_BACKGROUND.image,
+    overlay: clampNumber(config.dashboardBackgroundOverlay, 0, 0.8, DEFAULT_DASHBOARD_BACKGROUND.overlay),
+    blur: clampNumber(config.dashboardBackgroundBlur, 0, 20, DEFAULT_DASHBOARD_BACKGROUND.blur),
+    position: position === 'top' || position === 'bottom' ? position : 'center',
+    size: size === 'contain' || size === 'auto' ? size : 'cover',
+  };
 }
 
 function uptimePercent(checks: WebsiteHeartbeatPoint[]) {
   if (checks.length === 0) return '0%';
   const ok = checks.filter((check) => check.ok).length;
-  return `${Math.round((ok / checks.length) * 100)}%`;
-}
-
-function lastSeenText(value: string | null) {
-  if (!value) return '现在';
-  const diff = Math.max(0, Date.now() - new Date(value).getTime());
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return '现在';
-  if (minutes < 60) return `${minutes}m 之前`;
-  return `${Math.floor(minutes / 60)}h 之前`;
-}
-
-function statusLine(monitor: WebsiteMonitorSummary) {
-  const latency = `${monitor.last_latency_ms ?? 0}ms`;
-  if (monitor.url.startsWith('tcp:')) return `${statusText(monitor.status)} · TCP · ${latency}`;
-  if (monitor.status === 'down') return `${statusText(monitor.status)} · HTTP ${monitor.last_raw_status_code ?? monitor.last_status_code ?? '-'} · ${latency}`;
-  return `${statusText(monitor.status)} · ${latency}`;
+  const percent = (ok / checks.length) * 100;
+  return `${percent >= 99.995 ? '100' : percent.toFixed(2)}%`;
 }
 
 function checksInPeriod(checks: WebsiteHeartbeatPoint[], hours: number) {
@@ -85,88 +134,173 @@ export default function WebsiteMonitorList({
   periodHours,
   onPeriodChange,
   periods = [1, 24, 72],
+  servers = [],
 }: {
   monitors: WebsiteMonitorSummary[];
   loading?: boolean;
   periodHours: number;
   onPeriodChange: (hours: number) => void;
   periods?: readonly number[];
+  servers?: Array<{ uuid: string; name: string }>;
 }) {
-  // ponytail: 切换周期时 checks 数据异步到达，用新周期对旧数据分桶会产生大量空桶闪灰。
+  // 切换周期时 checks 数据异步到达，用新周期对旧数据分桶会产生大量空桶闪灰。
   // loading 期间保持上一个已渲染周期，数据就绪后一并切换。
   const lastPeriodRef = useRef(periodHours);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<'全部' | WebsiteAssetCategory>('全部');
+  const [status, setStatus] = useState<'all' | WebsiteMonitorStatus>('all');
+  const [selected, setSelected] = useState<WebsiteAssetViewModel | null>(null);
+  const [backgroundSettings, setBackgroundSettings] = useState(DEFAULT_DASHBOARD_BACKGROUND);
+  const [backgroundPreview, setBackgroundPreview] = useState('');
   if (!loading) {
     lastPeriodRef.current = periodHours;
   }
   const renderPeriodHours = loading ? lastPeriodRef.current : periodHours;
+  const customizedBackground = Boolean(backgroundPreview);
+  const activeBackground = backgroundPreview || backgroundSettings.image;
+  const hasBackground = Boolean(activeBackground) && (backgroundSettings.enabled || customizedBackground);
+  const serverNames = useMemo(
+    () => new Map(servers.map((server) => [server.uuid, server.name || server.uuid])),
+    [servers],
+  );
 
-  const summary = useMemo(() => {
-    const up = monitors.filter((monitor) => monitor.status === 'up').length;
-    const down = monitors.filter((monitor) => monitor.status === 'down').length;
-    return { up, down, total: monitors.length };
-  }, [monitors]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchPublicSettings()
+      .then(async (settings) => {
+        const activeTheme = encodeURIComponent(settings.active_theme || 'monitor');
+        const response = await fetch(`/api/theme/manifest/${activeTheme}`);
+        if (!response.ok) return;
+        const payload = await response.json() as { config?: Record<string, unknown> };
+        if (!cancelled) setBackgroundSettings(normalizeDashboardBackground(payload.config || {}));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (backgroundPreview.startsWith('blob:')) URL.revokeObjectURL(backgroundPreview);
+    };
+  }, [backgroundPreview]);
+
+  const assets = useMemo<WebsiteAssetViewModel[]>(() => monitors.map((monitor) => {
+    const periodChecks = checksInPeriod(monitor.checks || [], renderPeriodHours);
+    const heartbeatSegments = heartbeatSegmentCount(renderPeriodHours, monitor.interval_sec);
+    return {
+      monitor,
+      metadata: metadataForMonitor(monitor, serverNames),
+      uptime: uptimePercent(periodChecks),
+      heartbeat: bucketChecksByPeriod(monitor.checks || [], renderPeriodHours, heartbeatSegments),
+      heartbeatSegments,
+    };
+  }), [monitors, renderPeriodHours, serverNames]);
+
+  const filteredAssets = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return assets.filter(({ monitor, metadata }) => {
+      if (category !== '全部' && metadata.category !== category) return false;
+      if (status !== 'all' && monitor.status !== status) return false;
+      if (!normalizedQuery) return true;
+      return [
+        monitor.name,
+        metadata.description,
+        metadata.domain,
+        metadata.category,
+        ...metadata.tags,
+      ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+    });
+  }, [assets, category, query, status]);
+
+  const summary = useMemo(() => ({
+    total: assets.length,
+    up: assets.filter(({ monitor }) => monitor.status === 'up').length,
+    down: assets.filter(({ monitor }) => monitor.status === 'down').length,
+    paused: assets.filter(({ monitor }) => monitor.status === 'paused').length,
+  }), [assets]);
 
   return (
-    <section className="kuma-monitor-list">
-      <div className="kuma-monitor-summary">
-        <Box className="kuma-monitor-title-line">
-          <Text size="4" weight="bold">网站监控</Text>
-          <Text size="2" color="gray">
-            {summary.total === 0 ? (loading ? '加载中' : '暂无网站') : `${summary.up} 正常 / ${summary.down} 失效 / ${summary.total} 总数`}
-          </Text>
-        </Box>
-        <SegmentedControl.Root
-          size="1"
-          value={String(periodHours)}
-          onValueChange={(value) => onPeriodChange(Number(value))}
-        >
-          {periods.map((hours) => (
-            <SegmentedControl.Item key={hours} value={String(hours)}>
-              {hours}小时
-            </SegmentedControl.Item>
-          ))}
-        </SegmentedControl.Root>
+    <section className={`website-asset-dashboard${hasBackground ? ' has-dashboard-background' : ' has-no-dashboard-background'}`}>
+      {hasBackground && (
+        <>
+          <div
+            className="website-dashboard-background"
+            style={{
+              backgroundImage: `url(${JSON.stringify(activeBackground)})`,
+              backgroundPosition: backgroundSettings.position,
+              backgroundSize: backgroundSettings.size,
+              filter: backgroundSettings.blur > 0 ? `blur(${backgroundSettings.blur}px) scale(1.03)` : undefined,
+            }}
+            aria-hidden="true"
+          />
+          <div
+            className="website-dashboard-background-overlay"
+            style={{ background: `rgba(5, 9, 17, ${backgroundSettings.overlay})` }}
+            aria-hidden="true"
+          />
+        </>
+      )}
+
+      <div className="website-asset-dashboard-content">
+        <header className="website-asset-toolbar">
+          <div className="website-asset-toolbar-title">
+            <div className="website-asset-heading-line">
+              <h1>我的网站</h1>
+            </div>
+            <div className="website-asset-summary" aria-label="网站状态摘要">
+              <span><strong>{summary.total}</strong> Sites</span>
+              <span className="is-up"><strong>{summary.up}</strong> Online</span>
+              <span className="is-down"><strong>{summary.down}</strong> Offline</span>
+              <span className="is-paused"><strong>{summary.paused}</strong> Paused</span>
+            </div>
+          </div>
+
+          <div className="website-asset-toolbar-actions">
+            <WebsiteBackgroundPreviewControl
+              customized={customizedBackground}
+              onSelect={(file) => setBackgroundPreview(URL.createObjectURL(file))}
+              onReset={() => setBackgroundPreview('')}
+            />
+            <SegmentedControl.Root
+              className="website-asset-period"
+              size="1"
+              value={String(periodHours)}
+              onValueChange={(value) => onPeriodChange(Number(value))}
+            >
+              {periods.map((hours) => (
+                <SegmentedControl.Item key={hours} value={String(hours)}>
+                  {hours}h
+                </SegmentedControl.Item>
+              ))}
+            </SegmentedControl.Root>
+          </div>
+        </header>
+
+        <WebsiteAssetFilters
+          query={query}
+          category={category}
+          status={status}
+          onQueryChange={setQuery}
+          onCategoryChange={setCategory}
+          onStatusChange={setStatus}
+        />
+
+        {loading && <div className="website-asset-loading">正在刷新监控状态…</div>}
+
+        <WebsiteAssetGrid
+          assets={filteredAssets}
+          periodHours={renderPeriodHours}
+          onOpenDetails={setSelected}
+        />
       </div>
-      <div className="kuma-monitor-items">
-        {monitors.map((monitor) => {
-          const periodChecks = checksInPeriod(monitor.checks || [], renderPeriodHours);
-          const segmentCount = heartbeatSegmentCount(renderPeriodHours, monitor.interval_sec);
-          const bucketedChecks = bucketChecksByPeriod(monitor.checks || [], renderPeriodHours, segmentCount);
-          return (
-          <article
-            key={monitor.id}
-            className={`kuma-monitor-row is-${monitor.status}`}
-          >
-            <span className={`kuma-monitor-uptime-pill is-${monitor.status}`}>{uptimePercent(periodChecks)}</span>
-            <Box className="kuma-monitor-row-main">
-              <Flex align="center" gap="2" className="kuma-monitor-url-line">
-                <a
-                  href={monitor.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  {monitor.name}
-                </a>
-                <ExternalLink size={12} aria-hidden="true" />
-              </Flex>
-              <Text size="1" color={monitor.status === 'up' ? 'green' : monitor.status === 'down' ? 'red' : 'gray'}>
-                {statusLine(monitor)}
-              </Text>
-            </Box>
-            <Box className="kuma-monitor-row-heartbeat">
-              <WebsiteHeartbeatBar checks={bucketedChecks} max={segmentCount} />
-              <Flex justify="between" className="kuma-monitor-row-time">
-                <Text size="1" color="gray">{renderPeriodHours}h</Text>
-                <Text size="1" color="gray">{lastSeenText(monitor.last_checked_at)}</Text>
-              </Flex>
-            </Box>
-          </article>
-        )})}
-        {monitors.length === 0 && !loading && (
-          <div className="kuma-monitor-empty">暂无网站监控</div>
-        )}
-      </div>
+
+      <WebsiteAssetDetails
+        asset={selected}
+        open={Boolean(selected)}
+        onOpenChange={(open) => !open && setSelected(null)}
+      />
     </section>
   );
 }

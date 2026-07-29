@@ -22,6 +22,15 @@ export interface WebsiteMonitorInput {
   agent_probe_clients: string[];
   agent_probe_limit: number;
   agent_probe_status_enabled: boolean;
+  description: string;
+  category: string;
+  tags: string[];
+  icon: string;
+  server_uuid: string | null;
+  domain: string;
+  deployment: string;
+  repository_url: string;
+  note: string;
 }
 
 export type WebsiteMonitorValidationResult =
@@ -187,6 +196,25 @@ function readStringArray(value: unknown): string[] {
   return result;
 }
 
+function readLimitedString(value: unknown, maxLength: number): string {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+}
+
+function readTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const tag = item.trim().slice(0, 40);
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    tags.push(tag);
+    if (tags.length >= 20) break;
+  }
+  return tags;
+}
+
 export function validateWebsiteMonitorInput(input: Record<string, unknown>): WebsiteMonitorValidationResult {
   const name = String(input.name || '').trim();
   if (!name || name.length > 120) return { ok: false, error: 'invalid_name' };
@@ -243,6 +271,15 @@ export function validateWebsiteMonitorInput(input: Record<string, unknown>): Web
       agent_probe_clients: readStringArray(input.agent_probe_clients),
       agent_probe_limit,
       agent_probe_status_enabled: typeof input.agent_probe_status_enabled === 'boolean' ? input.agent_probe_status_enabled : true,
+      description: readLimitedString(input.description, 1000),
+      category: readLimitedString(input.category, 64),
+      tags: readTags(input.tags),
+      icon: readLimitedString(input.icon, 1024),
+      server_uuid: readLimitedString(input.server_uuid, 128) || null,
+      domain: readLimitedString(input.domain, 253),
+      deployment: readLimitedString(input.deployment, 128),
+      repository_url: readLimitedString(input.repository_url, 1024),
+      note: readLimitedString(input.note, 4000),
     },
   };
 }

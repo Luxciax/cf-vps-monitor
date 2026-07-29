@@ -123,15 +123,16 @@ function normalizePingTaskList<T extends { clients?: unknown; all_clients?: unkn
   return tasks.map(normalizePingTask);
 }
 
-function normalizeWebsiteMonitor<T extends { agent_probe_clients?: unknown; agent_probe_status_enabled?: unknown }>(monitor: T): T {
+function normalizeWebsiteMonitor<T extends { agent_probe_clients?: unknown; agent_probe_status_enabled?: unknown; tags?: unknown }>(monitor: T): T {
   return {
     ...monitor,
     agent_probe_clients: readRpcStringArray((monitor as Record<string, unknown>).agent_probe_clients),
     agent_probe_status_enabled: readRpcBoolean((monitor as Record<string, unknown>).agent_probe_status_enabled),
+    tags: readRpcStringArray((monitor as Record<string, unknown>).tags),
   } as T;
 }
 
-function normalizeWebsiteMonitorList<T extends { agent_probe_clients?: unknown; agent_probe_status_enabled?: unknown }>(monitors: T[]): T[] {
+function normalizeWebsiteMonitorList<T extends { agent_probe_clients?: unknown; agent_probe_status_enabled?: unknown; tags?: unknown }>(monitors: T[]): T[] {
   return monitors.map(normalizeWebsiteMonitor);
 }
 

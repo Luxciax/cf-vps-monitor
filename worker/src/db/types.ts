@@ -253,6 +253,15 @@ export interface WebsiteMonitor {
   agent_probe_clients: string[];
   agent_probe_limit: number;
   agent_probe_status_enabled: boolean;
+  description: string;
+  category: string;
+  tags: string[];
+  icon: string;
+  server_uuid: string | null;
+  domain: string;
+  deployment: string;
+  repository_url: string;
+  note: string;
   sort_order: number;
   status: WebsiteMonitorStatus;
   last_checked_at: string | null;
@@ -318,6 +327,14 @@ export interface PublicWebsiteMonitor {
   last_raw_status_code: number | null;
   last_latency_ms: number | null;
   last_effective_reason: string | null;
+  description: string;
+  category: string;
+  tags: string[];
+  icon: string;
+  server_uuid: string | null;
+  domain: string;
+  deployment: string;
+  repository_url: string;
   checks: Array<Pick<WebsiteCheck, 'checked_at' | 'ok' | 'effective_status' | 'effective_reason' | 'status_code' | 'raw_status_code' | 'latency_ms' | 'source_type' | 'source_client'>>;
 }
 

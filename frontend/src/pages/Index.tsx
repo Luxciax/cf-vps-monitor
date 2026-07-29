@@ -116,6 +116,14 @@ function normalizeWebsiteSummary(input: unknown, options: { includeHidden?: bool
     last_latency_ms: typeof value.last_latency_ms === 'number' ? value.last_latency_ms : null,
     last_effective_reason: typeof value.last_effective_reason === 'string' ? value.last_effective_reason : null,
     hidden,
+    description: typeof value.description === 'string' ? value.description : '',
+    category: typeof value.category === 'string' ? value.category : '',
+    tags: Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === 'string') : [],
+    icon: typeof value.icon === 'string' ? value.icon : '',
+    server_uuid: typeof value.server_uuid === 'string' && value.server_uuid ? value.server_uuid : null,
+    domain: typeof value.domain === 'string' ? value.domain : '',
+    deployment: typeof value.deployment === 'string' ? value.deployment : '',
+    repository_url: typeof value.repository_url === 'string' ? value.repository_url : '',
     checks: Array.isArray(value.checks) ? value.checks : [],
   };
 }
@@ -483,7 +491,14 @@ export default function Index() {
       ) : (
         <section className="website-monitor-shell">
           {websitesError && <ApiUnavailableNotice error={websitesError} />}
-          <WebsiteMonitorList monitors={websites} loading={websitesLoading} periodHours={websitePeriodHours} onPeriodChange={handleWebsitePeriodChange} periods={WEBSITE_MONITOR_PERIODS} />
+          <WebsiteMonitorList
+            monitors={websites}
+            loading={websitesLoading}
+            periodHours={websitePeriodHours}
+            onPeriodChange={handleWebsitePeriodChange}
+            periods={WEBSITE_MONITOR_PERIODS}
+            servers={clients.map((client) => ({ uuid: client.uuid, name: client.name }))}
+          />
         </section>
       )}
     </div>

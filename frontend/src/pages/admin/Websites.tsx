@@ -31,6 +31,7 @@ import {
   SegmentedControl,
   Table,
   Text,
+  TextArea,
   TextField,
   Tooltip,
 } from '@radix-ui/themes';
@@ -67,6 +68,15 @@ interface WebsiteMonitor {
   agent_probe_clients: string[];
   agent_probe_limit: number;
   agent_probe_status_enabled: boolean;
+  description: string;
+  category: string;
+  tags: string[];
+  icon: string;
+  server_uuid: string | null;
+  domain: string;
+  deployment: string;
+  repository_url: string;
+  note: string;
   status: WebsiteStatus;
   last_checked_at: string | null;
   last_status_code: number | null;
@@ -102,7 +112,24 @@ const emptyForm = {
   agent_probe_clients: [] as string[],
   agent_probe_limit: 3,
   agent_probe_status_enabled: true,
+  description: '',
+  category: '',
+  tags: '',
+  icon: '',
+  server_uuid: '',
+  domain: '',
+  deployment: '',
+  repository_url: '',
+  note: '',
 };
+
+const websiteAssetCategories = ['AI', '工具', '存储', '博客', 'API', '管理', '媒体', '其他'];
+
+function parseTags(value: string) {
+  return Array.from(new Set(
+    value.split(/[,，\n]/).map((tag) => tag.trim()).filter(Boolean),
+  )).slice(0, 20);
+}
 
 function statusLabel(status: WebsiteStatus) {
   if (status === 'up') return '正常';
@@ -361,7 +388,15 @@ export default function AdminWebsites() {
       if (statusFilter === 'hidden') return monitor.hidden;
       return true;
     });
-    const searched = needle ? statusFiltered.filter((monitor) => `${monitor.name} ${monitor.url}`.toLowerCase().includes(needle)) : statusFiltered;
+    const searched = needle ? statusFiltered.filter((monitor) => [
+      monitor.name,
+      monitor.url,
+      monitor.description,
+      monitor.domain,
+      monitor.category,
+      monitor.deployment,
+      ...(monitor.tags || []),
+    ].join(' ').toLowerCase().includes(needle)) : statusFiltered;
     if (sortKey === 'manual') return searched;
     return [...searched].sort((a, b) => {
       const left = sortKey === 'name' ? a.name : a.status;
@@ -471,6 +506,15 @@ export default function AdminWebsites() {
       agent_probe_clients: Array.isArray(monitor.agent_probe_clients) ? monitor.agent_probe_clients : [],
       agent_probe_limit: monitor.agent_probe_limit || 3,
       agent_probe_status_enabled: Boolean(monitor.agent_probe_status_enabled),
+      description: monitor.description || '',
+      category: monitor.category || '',
+      tags: Array.isArray(monitor.tags) ? monitor.tags.join(', ') : '',
+      icon: monitor.icon || '',
+      server_uuid: monitor.server_uuid || '',
+      domain: monitor.domain || '',
+      deployment: monitor.deployment || '',
+      repository_url: monitor.repository_url || '',
+      note: monitor.note || '',
     } : emptyForm);
     if (!monitor) setChecks([]);
     setEditOpen(true);
@@ -494,7 +538,20 @@ export default function AdminWebsites() {
     }
     setSaving(true);
     try {
-      const payload = { ...form, name: form.name.trim(), url: form.url.trim() };
+      const payload = {
+        ...form,
+        name: form.name.trim(),
+        url: form.url.trim(),
+        description: form.description.trim(),
+        category: form.category.trim(),
+        tags: parseTags(form.tags),
+        icon: form.icon.trim(),
+        server_uuid: form.server_uuid || null,
+        domain: form.domain.trim(),
+        deployment: form.deployment.trim(),
+        repository_url: form.repository_url.trim(),
+        note: form.note.trim(),
+      };
       const result = editMonitor
         ? await apiFetch('/admin/websites/edit', { method: 'POST', body: JSON.stringify({ id: editMonitor.id, ...payload }) })
         : await apiFetch('/admin/websites/add', { method: 'POST', body: JSON.stringify(payload) });
@@ -830,6 +887,92 @@ export default function AdminWebsites() {
                 onChange={(event) => update('url', event.target.value)}
               />
             </label>
+            <Text size="3" weight="bold" mt="2">网站资产信息</Text>
+            <label>
+              <Text size="2" weight="bold">用途说明</Text>
+              <TextArea
+                value={form.description}
+                placeholder="这个网站是做什么的"
+                onChange={(event) => update('description', event.target.value)}
+              />
+            </label>
+            <Grid className="admin-website-compact-grid" columns={{ initial: '1', sm: '2' }} gap="3">
+              <label>
+                <Text size="2" weight="bold">主域名</Text>
+                <TextField.Root
+                  value={form.domain}
+                  placeholder="example.com"
+                  onChange={(event) => update('domain', event.target.value)}
+                />
+              </label>
+              <label>
+                <Text size="2" weight="bold">分类</Text>
+                <TextField.Root
+                  value={form.category}
+                  list="website-asset-category-options"
+                  placeholder="选择或输入自定义分类"
+                  onChange={(event) => update('category', event.target.value)}
+                />
+                <datalist id="website-asset-category-options">
+                  {websiteAssetCategories.map((item) => <option value={item} key={item} />)}
+                </datalist>
+              </label>
+              <label>
+                <Text size="2" weight="bold">所属服务器</Text>
+                <Select.Root value={form.server_uuid || 'unlinked'} onValueChange={(value) => update('server_uuid', value === 'unlinked' ? '' : value)}>
+                  <Select.Trigger style={{ width: '100%' }} />
+                  <Select.Content>
+                    <Select.Item value="unlinked">未关联服务器</Select.Item>
+                    {clients.map((client) => (
+                      <Select.Item value={client.uuid} key={client.uuid}>{client.name || client.uuid}</Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+              </label>
+              <label>
+                <Text size="2" weight="bold">部署方式</Text>
+                <TextField.Root
+                  value={form.deployment}
+                  placeholder="Docker Compose / Workers / 1Panel"
+                  onChange={(event) => update('deployment', event.target.value)}
+                />
+              </label>
+            </Grid>
+            <label>
+              <Text size="2" weight="bold">标签</Text>
+              <TextField.Root
+                value={form.tags}
+                placeholder="Docker, Cloudflare, 自用"
+                onChange={(event) => update('tags', event.target.value)}
+              />
+            </label>
+            <Grid className="admin-website-compact-grid" columns={{ initial: '1', sm: '2' }} gap="3">
+              <label>
+                <Text size="2" weight="bold">图标</Text>
+                <TextField.Root
+                  value={form.icon}
+                  placeholder="留空自动读取 /favicon.ico"
+                  onChange={(event) => update('icon', event.target.value)}
+                />
+              </label>
+              <label>
+                <Text size="2" weight="bold">代码仓库</Text>
+                <TextField.Root
+                  value={form.repository_url}
+                  placeholder="https://github.com/..."
+                  onChange={(event) => update('repository_url', event.target.value)}
+                />
+              </label>
+            </Grid>
+            <label>
+              <Text size="2" weight="bold">私人备注</Text>
+              <TextArea
+                value={form.note}
+                placeholder="仅后台可见，不会返回给匿名访客"
+                onChange={(event) => update('note', event.target.value)}
+              />
+            </label>
+            <Text size="3" weight="bold" mt="2">监控设置</Text>
             <Grid className="admin-website-compact-grid" columns={{ initial: '1', sm: '3' }} gap="3">
               <label><Text size="2" weight="bold">检测间隔(秒)</Text><TextField.Root type="number" value={String(form.interval_sec)} onChange={(event) => update('interval_sec', Number(event.target.value))} /></label>
               <label><Text size="2" weight="bold">超时(秒)</Text><TextField.Root type="number" value={String(form.timeout_sec)} onChange={(event) => update('timeout_sec', Number(event.target.value))} /></label>

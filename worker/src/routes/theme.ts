@@ -10,6 +10,8 @@ import {
   normalizeThemePath,
   parseThemeZip,
   validateThemeConfig,
+  type ThemeConfigItem,
+  type ThemeManifest,
 } from '../utils/theme-package';
 import { readJsonWithLimit, readRequestBytesWithLimit } from '../utils/request-body';
 import { invalidatePublicMetadataCache } from './public';
@@ -37,6 +39,50 @@ const BUILTIN_THEMES = [
     previewUrl: '/theme-previews/next.svg',
   },
 ] as const;
+
+const DASHBOARD_BACKGROUND_CONFIGURATION: ThemeConfigItem[] = [
+  { type: 'title', name: '网站 Dashboard 背景' },
+  {
+    key: 'dashboardBackgroundEnabled',
+    name: '启用网站背景',
+    type: 'switch',
+    default: true,
+    help: '仅作用于公开网站资产 Dashboard',
+  },
+  {
+    key: 'dashboardBackgroundImage',
+    name: '背景图片',
+    type: 'image',
+    default: '/preview-bg.png',
+    help: '支持 HTTPS 外部 URL 或 /api/theme/assets/... 主题资源路径',
+  },
+  { key: 'dashboardBackgroundOverlay', name: '遮罩强度', type: 'range', min: 0, max: 0.8, step: 0.05, default: 0.3 },
+  { key: 'dashboardBackgroundBlur', name: '背景模糊', type: 'range', min: 0, max: 20, step: 1, default: 0 },
+  { key: 'dashboardBackgroundPosition', name: '背景位置', type: 'select', options: 'center,top,bottom', default: 'center' },
+  { key: 'dashboardBackgroundSize', name: '背景尺寸', type: 'select', options: 'cover,contain,auto', default: 'cover' },
+];
+
+function withDashboardBackgroundConfiguration(manifest: ThemeManifest): ThemeManifest {
+  const dashboardKeys = new Set(DASHBOARD_BACKGROUND_CONFIGURATION.map(item => item.key).filter(Boolean));
+  const retained = (manifest.configuration?.data || []).filter(item => !item.key || !dashboardKeys.has(item.key));
+  return {
+    ...manifest,
+    configuration: {
+      ...manifest.configuration,
+      type: manifest.configuration?.type || 'managed',
+      data: [...retained, ...DASHBOARD_BACKGROUND_CONFIGURATION],
+    },
+  };
+}
+
+function normalizedThemeConfig(manifest: ThemeManifest, config: Record<string, unknown>) {
+  const mergedManifest = withDashboardBackgroundConfiguration(manifest);
+  const validated = validateThemeConfig(mergedManifest, config);
+  return {
+    manifest: mergedManifest,
+    config: validated.ok ? validated.config : config,
+  };
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -124,7 +170,10 @@ async function ensureBuiltinTheme(database: ReturnType<typeof getDatabase>, shor
 }
 
 function themeSummary(theme: db.Theme, activeTheme: string) {
-  const manifest = safeManifest(theme.manifest_json);
+  const rawManifest = safeManifest(theme.manifest_json);
+  const normalized = rawManifest
+    ? normalizedThemeConfig(rawManifest, jsonParseObject(theme.config_json))
+    : null;
   const builtin = isBuiltinTheme(theme.short);
   return {
     short: theme.short,
@@ -138,8 +187,8 @@ function themeSummary(theme: db.Theme, activeTheme: string) {
     active: activeTheme === theme.short,
     deletable: !builtin,
     configurable: true,
-    manifest,
-    config: jsonParseObject(theme.config_json),
+    manifest: normalized?.manifest || null,
+    config: normalized?.config || jsonParseObject(theme.config_json),
     custom_css: theme.custom_css,
   };
 }
@@ -224,7 +273,7 @@ adminThemeRoutes.post('/upload', async (c) => {
   const database = getDatabase(c.env);
   const existing = await db.getTheme(database, parsed.theme.short);
   if (existing) {
-    const manifest = normalizeThemeManifest(JSON.parse(parsed.theme.manifest_json));
+    const manifest = withDashboardBackgroundConfiguration(normalizeThemeManifest(JSON.parse(parsed.theme.manifest_json)));
     const validated = validateThemeConfig(manifest, jsonParseObject(existing.config_json));
     parsed.theme.config_json = JSON.stringify(validated.ok ? validated.config : jsonParseObject(parsed.theme.config_json));
     parsed.theme.custom_css = existing.custom_css;
@@ -263,7 +312,7 @@ adminThemeRoutes.post('/settings', async (c) => {
   const database = getDatabase(c.env);
   const theme = isBuiltinTheme(short) ? await ensureBuiltinTheme(database, short) : await db.getTheme(database, short);
   if (!theme) return c.json({ error: '主题不存在' }, 404);
-  const manifest = normalizeThemeManifest(JSON.parse(theme.manifest_json));
+  const manifest = withDashboardBackgroundConfiguration(normalizeThemeManifest(JSON.parse(theme.manifest_json)));
   const config = validateThemeConfig(manifest, parsed.body.config);
   if (!config.ok) return c.json({ error: config.error }, 400);
   await db.updateThemeSettings(database, short, JSON.stringify(config.config), customCss);
@@ -327,9 +376,13 @@ publicThemeRoutes.get('/manifest/:theme', async (c) => {
   if (!/^[A-Za-z0-9_-]+$/.test(short)) return c.json({ error: 'Not Found' }, 404);
   const theme = await db.getTheme(getDatabase(c.env), short);
   if (!theme) return c.json({ error: 'Not Found' }, 404);
+  const manifest = safeManifest(theme.manifest_json);
+  const normalized = manifest
+    ? normalizedThemeConfig(manifest, jsonParseObject(theme.config_json))
+    : null;
   return publicJson({
     short: theme.short,
-    manifest: safeManifest(theme.manifest_json),
-    config: jsonParseObject(theme.config_json),
+    manifest: normalized?.manifest || null,
+    config: normalized?.config || jsonParseObject(theme.config_json),
   });
 });

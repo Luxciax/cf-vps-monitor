@@ -578,6 +578,18 @@ type WebsiteMonitorMetadataDetail = true | {
   remove?: number[];
   reorder?: number[];
 };
+
+function publicWebsiteMetadataDetail(detail: WebsiteMonitorMetadataDetail): WebsiteMonitorMetadataDetail {
+  if (detail === true || !detail.upsert) return detail;
+  return {
+    ...detail,
+    upsert: detail.upsert.map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+      const { note: _privateNote, ...publicItem } = item as Record<string, unknown>;
+      return publicItem;
+    }),
+  };
+}
 const WEBSITE_MONITOR_REQUIRED_EDIT_FIELDS = [
   'name',
   'url',
@@ -593,7 +605,7 @@ const WEBSITE_MONITOR_REQUIRED_EDIT_FIELDS = [
 
 function invalidateWebsiteMonitorPublicState(c: AdminContext, websites: WebsiteMonitorMetadataDetail = true): void {
   invalidateAdminPublicMetadata(c);
-  runAdminBackground(c, broadcastLiveMetadataChanged(c, { websites }));
+  runAdminBackground(c, broadcastLiveMetadataChanged(c, { websites: publicWebsiteMetadataDetail(websites) }));
   runAdminBackground(c, refreshLiveAgentPolicy(c));
 }
 
