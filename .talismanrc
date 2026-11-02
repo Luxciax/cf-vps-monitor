@@ -47,7 +47,7 @@ fileignoreconfig:
 - filename: frontend/src/utils/publicHistory.ts
   checksum: b26761bab76ea3c919067ac49c3901ba858ee4aba57f6bf0d24d2afd548f1bf0
 - filename: README.md
-  checksum: 0bb0d22d1a3921ac9ebb9dc59fdb30814a6da1a80382cc69845fe0924b043360
+  checksum: ae915042bf1c32f7a61a25b3808065f3ef2f6a099ee7c1994d72995777d42371
 - filename: frontend/src/utils/reauth.ts
   checksum: 0520feb0b6c4d7bd62f99295a759a4f0ce7963fb3d43223d233a53f3a12228cd
 - filename: agent/container_disk_usage.go
