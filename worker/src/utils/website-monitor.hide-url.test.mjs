@@ -82,7 +82,7 @@ const admin = readFileSync(new URL('../routes/admin.ts', import.meta.url), 'utf8
 assert.match(admin, /function publicWebsiteMetadataDetail/, '必须存在公开载荷裁剪函数');
 assert.match(
   admin,
-  /item\.hide_url === true \? \{ \.\.\.item, url: null \}/,
+  /item\.hide_url === true \? \{ \.\.\.publicItem, url: null, domain: '', icon: '' \}/,
   '公开广播载荷里 hide_url 为真的条目必须把 url 置空',
 );
 assert.match(

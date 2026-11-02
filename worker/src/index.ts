@@ -53,6 +53,7 @@ import type {
 } from './db/queries';
 
 type RuntimeBindings = {
+  ASSETS?: { fetch(request: Request): Promise<Response> };
   SUPABASE_URL?: string;
   SUPABASE_SECRET_KEY?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
@@ -420,9 +421,14 @@ app.get('/api/version', (c) => {
 // 404 处理
 // 前端静态资源由 wrangler.toml 的 [assets] 托管；
 // 非 API 路由的 SPA fallback 也由 Workers Static Assets 接管。
-app.notFound((c) => {
+app.notFound(async (c) => {
   const url = new URL(c.req.url);
   if (!url.pathname.startsWith('/api/') && url.pathname !== '/ping') {
+    const assets = c.env.ASSETS;
+    if (assets) {
+      const assetResponse = await assets.fetch(c.req.raw);
+      if (assetResponse.status !== 404) return assetResponse;
+    }
     return c.text('CF VPS Monitor frontend asset not found. Run `npm run build` in ../frontend and check [assets] in worker/wrangler.toml.', 404);
   }
   return c.json({ error: 'Not Found' }, 404);

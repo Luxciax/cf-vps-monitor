@@ -161,8 +161,8 @@
   padding: 2px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(15, 23, 42, 0.5);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
 .website-asset-toolbar-actions {
@@ -194,8 +194,8 @@
   font-size: 11px;
   font-weight: 650;
   cursor: pointer;
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   transition: border-color 0.16s ease, background 0.16s ease;
 }
 
@@ -243,8 +243,8 @@
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.64);
   color: rgba(248, 250, 252, 0.72);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   transition: border-color 0.16s ease, background 0.16s ease;
 }
 
@@ -314,8 +314,8 @@
   background: rgba(15, 23, 42, 0.72);
   color: #f8fafc;
   box-shadow: 0 14px 34px rgba(2, 6, 23, 0.2);
-  backdrop-filter: blur(13px) saturate(118%);
   -webkit-backdrop-filter: blur(13px) saturate(118%);
+  backdrop-filter: blur(13px) saturate(118%);
   cursor: pointer;
   transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
 }
@@ -768,8 +768,8 @@
     padding: 14px;
     gap: 12px;
     border-radius: 10px;
-    backdrop-filter: blur(9px) saturate(112%);
     -webkit-backdrop-filter: blur(9px) saturate(112%);
+    backdrop-filter: blur(9px) saturate(112%);
   }
 
   .website-asset-card-header {

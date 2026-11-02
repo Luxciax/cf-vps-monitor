@@ -97,7 +97,12 @@ export async function createRuntimeFixture({ persistDurableObjects = false, exte
     await mf.ready;
     return {
       database, mf, rpcCalls, outboundCalls,
-      fetch: (path, init = {}) => mf.dispatchFetch(`https://panel.example.test${path}`, init),
+      fetch: (path, init = {}) => {
+        const normalizedPath = path.startsWith('/cdn-cgi/handler/scheduled')
+          ? path.replace('/cdn-cgi/handler/scheduled', '/cdn-cgi/local/scheduled')
+          : path;
+        return mf.dispatchFetch(`https://panel.example.test${normalizedPath}`, init);
+      },
       synchronizeInitialCreation() {
         let resolve;
         const promise = new Promise(done => { resolve = done; });
