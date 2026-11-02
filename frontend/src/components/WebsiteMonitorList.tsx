@@ -19,7 +19,10 @@ const DEFAULT_WEBSITE_INTERVAL_SEC = 120;
 export interface WebsiteMonitorSummary {
   id: number;
   name: string;
-  url: string;
+  /** 勾选「对游客隐藏地址」时服务端返回 null——此时不得渲染任何链接。 */
+  url: string | null;
+  /** 服务端下发的监控类型，用于区分 TCP 与 HTTP，不依赖 url 字符串。 */
+  method?: 'GET' | 'HEAD' | 'TCP';
   interval_sec: number;
   status: WebsiteMonitorStatus;
   last_checked_at: string | null;
@@ -28,6 +31,7 @@ export interface WebsiteMonitorSummary {
   last_latency_ms: number | null;
   last_effective_reason?: string | null;
   hidden?: boolean;
+  hide_url?: boolean;
   description: string;
   category: string;
   tags: string[];

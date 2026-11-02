@@ -1,12 +1,17 @@
 import { clearCachedPublicBootstrap } from './publicBootstrap';
-import { patchCachedPublicBootstrapClients } from './publicBootstrap';
+import { normalizePublicClientPatch, patchCachedPublicBootstrapClients } from './publicBootstrap';
+import { broadcastCrossTab, subscribeCrossTab } from './crossTabEvents';
+import { removeLocalStorageItem } from './browserStorage';
+import { clearCachedPublicSettings } from './publicSettings';
 
 export const PUBLIC_DATA_UPDATED_EVENT = 'cf-monitor:public-data-updated';
 export const PUBLIC_DATA_READY_EVENT = 'cf-monitor:public-data-ready';
 
-const CHANNEL_NAME = PUBLIC_DATA_UPDATED_EVENT;
-const EMPTY_UPDATE_SUPPRESS_MS = 10_000;
-let lastDetailedUpdateAt = 0;
+// Older versions persisted entire admin updates here; the key is only a transport envelope.
+removeLocalStorageItem(PUBLIC_DATA_UPDATED_EVENT);
+
+const subscribers = new Set<(detail?: PublicDataUpdateDetail) => void>();
+let stopTransport: (() => void) | null = null;
 
 export type PublicDataUpdateDetail = {
   force?: boolean;
@@ -17,27 +22,34 @@ export type PublicDataUpdateDetail = {
 };
 
 export function notifyPublicDataUpdated(detail?: PublicDataUpdateDetail) {
-  rememberDetailedUpdate(detail);
+  const safeDetail = sanitizePublicDataUpdate(detail);
+  if (subscribers.size === 0) applyPublicDataUpdate(safeDetail);
+  broadcastCrossTab(PUBLIC_DATA_UPDATED_EVENT, safeDetail);
+}
+
+function applyPublicDataUpdate(detail?: PublicDataUpdateDetail): void {
   if (detail?.clients) patchCachedPublicBootstrapClients(detail);
-  else clearCachedPublicBootstrap();
-  window.dispatchEvent(new CustomEvent(PUBLIC_DATA_UPDATED_EVENT, { detail }));
-  try {
-    localStorage.setItem(PUBLIC_DATA_UPDATED_EVENT, JSON.stringify({ at: Date.now(), detail }));
-  } catch {}
-  try {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    channel.postMessage({ type: PUBLIC_DATA_UPDATED_EVENT, detail });
-    channel.close();
-  } catch {}
+  else {
+    clearCachedPublicBootstrap();
+    clearCachedPublicSettings();
+  }
 }
 
-function rememberDetailedUpdate(detail?: PublicDataUpdateDetail) {
-  if (detail?.clients) lastDetailedUpdateAt = Date.now();
-}
-
-function shouldIgnoreEmptyUpdate(detail?: PublicDataUpdateDetail): boolean {
-  if (detail?.force) return false;
-  return !detail?.clients && Date.now() - lastDetailedUpdateAt < EMPTY_UPDATE_SUPPRESS_MS;
+function sanitizePublicDataUpdate(detail?: PublicDataUpdateDetail): PublicDataUpdateDetail | undefined {
+  if (!detail) return undefined;
+  if (!detail.clients) return detail.force ? { force: true } : undefined;
+  const remove = new Set((Array.isArray(detail.clients.remove) ? detail.clients.remove : [])
+    .filter((uuid): uuid is string => typeof uuid === 'string' && uuid.trim() !== ''));
+  const upsert = [];
+  for (const raw of Array.isArray(detail.clients.upsert) ? detail.clients.upsert : []) {
+    const client = normalizePublicClientPatch(raw);
+    if (!client) continue;
+    // Consumers have different visibility: refresh their own authorized view
+    // instead of sending hidden metadata or removing it from an admin's list.
+    if (client.hidden) return { force: true };
+    upsert.push(client);
+  }
+  return { ...(detail.force ? { force: true } : {}), clients: { upsert, remove: [...remove] } };
 }
 
 export function notifyPublicDataReady() {
@@ -45,38 +57,17 @@ export function notifyPublicDataReady() {
 }
 
 export function subscribePublicDataUpdated(callback: (detail?: PublicDataUpdateDetail) => void) {
-  const onLocalEvent = (event: Event) => {
-    const detail = event instanceof CustomEvent ? event.detail : undefined;
-    rememberDetailedUpdate(detail);
-    if (!shouldIgnoreEmptyUpdate(detail)) callback(detail);
-  };
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== PUBLIC_DATA_UPDATED_EVENT) return;
-    try {
-      const parsed = event.newValue ? JSON.parse(event.newValue) : null;
-      rememberDetailedUpdate(parsed?.detail);
-      if (!shouldIgnoreEmptyUpdate(parsed?.detail)) callback(parsed?.detail);
-    } catch {
-      if (!shouldIgnoreEmptyUpdate()) callback();
-    }
-  };
-  let channel: BroadcastChannel | null = null;
-
-  try {
-    channel = new BroadcastChannel(CHANNEL_NAME);
-    channel.onmessage = (event) => {
-      if (event.data?.type !== PUBLIC_DATA_UPDATED_EVENT) return;
-      rememberDetailedUpdate(event.data.detail);
-      if (!shouldIgnoreEmptyUpdate(event.data.detail)) callback(event.data.detail);
-    };
-  } catch {}
-
-  window.addEventListener(PUBLIC_DATA_UPDATED_EVENT, onLocalEvent);
-  window.addEventListener('storage', onStorage);
-
+  subscribers.add(callback);
+  if (!stopTransport) {
+    stopTransport = subscribeCrossTab(PUBLIC_DATA_UPDATED_EVENT, (raw) => {
+      const detail = sanitizePublicDataUpdate(raw as PublicDataUpdateDetail | undefined);
+      // Invalidate once before all consumers fetch, so their requests can coalesce.
+      applyPublicDataUpdate(detail);
+      for (const subscriber of [...subscribers]) subscriber(detail);
+    });
+  }
   return () => {
-    window.removeEventListener(PUBLIC_DATA_UPDATED_EVENT, onLocalEvent);
-    window.removeEventListener('storage', onStorage);
-    channel?.close();
+    subscribers.delete(callback);
+    if (subscribers.size === 0) { stopTransport?.(); stopTransport = null; }
   };
 }

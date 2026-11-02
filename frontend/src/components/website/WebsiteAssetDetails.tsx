@@ -37,10 +37,10 @@ export default function WebsiteAssetDetails({
         <div className="website-asset-details-head">
           <div>
             <Dialog.Title>{monitor.name}</Dialog.Title>
-            <a href={monitor.url} target="_blank" rel="noopener noreferrer">
+            {monitor.url ? <a href={monitor.url} target="_blank" rel="noopener noreferrer">
               {metadata.domain}
               <ExternalLink size={13} aria-hidden="true" />
-            </a>
+            </a> : <span>地址已隐藏</span>}
           </div>
           <Badge
             color={monitor.status === 'up' ? 'green' : monitor.status === 'down' ? 'red' : 'gray'}
@@ -90,11 +90,11 @@ export default function WebsiteAssetDetails({
               </Link>
             </Button>
           )}
-          <Button asChild>
+          {monitor.url && <Button asChild>
             <a href={monitor.url} target="_blank" rel="noopener noreferrer">
               打开网站<ExternalLink size={15} />
             </a>
-          </Button>
+          </Button>}
         </Flex>
       </Dialog.Content>
     </Dialog.Root>

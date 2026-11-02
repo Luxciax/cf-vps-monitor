@@ -26,7 +26,8 @@ export interface WebsiteAssetMetadata {
   note?: string;
 }
 
-function safeHostname(value: string) {
+function safeHostname(value: string | null) {
+  if (!value) return "地址已隐藏";
   if (value.startsWith('tcp:')) return value.replace(/^tcp:\/\//, '').split('/')[0];
   try {
     return new URL(value).hostname;
@@ -51,8 +52,8 @@ export function metadataForMonitor(
       : '未关联',
     server_uuid: monitor.server_uuid || undefined,
     deployment: monitor.deployment || '未填写',
-    domain: monitor.domain || safeHostname(monitor.url),
-    icon: monitor.icon || undefined,
+    domain: monitor.url ? monitor.domain || safeHostname(monitor.url) : "地址已隐藏",
+    icon: monitor.url ? monitor.icon || undefined : undefined,
     repository_url: monitor.repository_url || undefined,
   };
 }

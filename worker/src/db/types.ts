@@ -32,6 +32,8 @@ export interface Client {
   hidden: boolean;
   traffic_limit: number;
   traffic_limit_type: string;
+  // 每月流量重置日（1~31）。经 agent policy 下发；改它会让探针重建当期统计。
+  traffic_reset_day: number;
   sort_order?: number;
   created_at: string;
   updated_at: string;
@@ -66,8 +68,9 @@ export interface MonitorRecord {
   ram_total: number;
   swap: number;
   swap_total: number;
-  load: number;
-  temp: number;
+  // null = 本机负载不可取信（容器内 /proc/loadavg 透传宿主机），不是 0。
+  load: number | null;
+  temp: number | null;
   disk: number;
   disk_total: number;
   net_in: number;
@@ -151,6 +154,7 @@ export interface User {
 
 export interface LoginRateLimit {
   bucket: string;
+  failure_revision: string;
   failures: number;
   first_failed_at: string;
   last_failed_at: string;
@@ -239,6 +243,7 @@ export type WebsiteCheckSourceType = 'worker' | 'agent';
 
 export interface WebsiteMonitor {
   id: number;
+  config_revision: string;
   name: string;
   url: string;
   method: WebsiteMonitorMethod;
@@ -249,6 +254,8 @@ export interface WebsiteMonitor {
   grace_period_sec: number;
   enabled: boolean;
   hidden: boolean;
+  /** 对游客隐藏地址：公开出口的 url 返回 null，管理端不受影响。 */
+  hide_url: boolean;
   agent_probe_mode: WebsiteAgentProbeMode;
   agent_probe_clients: string[];
   agent_probe_limit: number;
@@ -281,6 +288,7 @@ export interface WebsiteMonitor {
 export type WebsiteMonitorInput = Omit<
   WebsiteMonitor,
   | 'id'
+  | 'config_revision'
   | 'sort_order'
   | 'status'
   | 'last_checked_at'
@@ -300,6 +308,7 @@ export type WebsiteMonitorInput = Omit<
 export interface WebsiteCheck {
   id: number;
   monitor_id: number;
+  config_revision: string | null;
   checked_at: string;
   ok: boolean;
   effective_status: Extract<WebsiteMonitorStatus, 'up' | 'down'>;
@@ -313,13 +322,32 @@ export interface WebsiteCheck {
 }
 
 export type WebsiteCheckInput =
-  Omit<WebsiteCheck, 'id' | 'source_type' | 'source_client'> &
+  Omit<WebsiteCheck, 'id' | 'source_type' | 'source_client' | 'config_revision'> &
+  { config_revision: string } &
   Partial<Pick<WebsiteCheck, 'source_type' | 'source_client'>>;
+
+export type WebsiteNotificationExpectation = Pick<
+  WebsiteMonitor, 'config_revision' | 'status' | 'down_since' | 'last_notified_at'
+>;
+
+export interface BackupConfigurationSnapshot {
+  settings: Record<string, string>;
+  clients: Client[];
+  ping_tasks: PingTask[];
+  offline_notifications: OfflineNotification[];
+  expiry_notifications: ExpiryNotification[];
+  load_notifications: LoadNotification[];
+  website_monitors: WebsiteMonitor[];
+}
 
 export interface PublicWebsiteMonitor {
   id: number;
   name: string;
-  url: string;
+  /** 勾选「对游客隐藏地址」时为 null——游客侧只有名称与状态。 */
+  url: string | null;
+  /** 公开下发监控类型，供前端区分 TCP 与 HTTP，不泄露地址。 */
+  method: WebsiteMonitorMethod;
+  hide_url: boolean;
   interval_sec: number;
   status: WebsiteMonitorStatus;
   last_checked_at: string | null;
@@ -336,6 +364,22 @@ export interface PublicWebsiteMonitor {
   deployment: string;
   repository_url: string;
   checks: Array<Pick<WebsiteCheck, 'checked_at' | 'ok' | 'effective_status' | 'effective_reason' | 'status_code' | 'raw_status_code' | 'latency_ms' | 'source_type' | 'source_client'>>;
+}
+
+export interface NotificationDeliveryClaim {
+  claimed: boolean;
+  delivered: boolean;
+  token: string | null;
+}
+
+export interface NotificationDeliveryCleanupResult {
+  notification_delivery_state: number;
+  has_more: boolean;
+}
+
+export interface NotificationDeliveryCleanupOptions {
+  batchSize?: number;
+  maxBatches?: number;
 }
 
 export interface OfflineNotificationUpdate {
@@ -407,6 +451,25 @@ export interface TableRowCounts {
 }
 
 export type HistoryTableRowCounts = Omit<TableRowCounts, 'audit_logs'>;
+
+// 历史表的真实磁盘占用（含索引与 TOAST），字节。
+export type HistoryTableByteSizes = HistoryTableRowCounts & { total: number };
+
+export interface HistoryStorageUsage {
+  live_rows: number;
+  live_row_bytes: number;
+  estimated_live_storage_bytes: number;
+  allocated_bytes: number;
+  reusable_bytes: null;
+  measurement: 'live-row-bytes-plus-index-estimate';
+  index_page_allowance_bytes_per_row: number;
+  tables: Record<keyof HistoryTableRowCounts, {
+    live_rows: number;
+    live_row_bytes: number;
+    estimated_live_storage_bytes: number;
+    allocated_bytes: number;
+  }>;
+}
 
 export interface BoundedTableRowCounts {
   counts: TableRowCounts;

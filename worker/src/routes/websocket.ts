@@ -25,7 +25,12 @@ const VIEWER_TOKEN_RATE_LIMIT_MAX = 20;
 const LIVE_CLIENTS_RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_CLIENTS_RATE_LIMIT_MAX = 180;
 const LIVE_CLIENTS_CACHE_SECONDS = 2;
-const DEFAULT_VIEWER_TTL_SECONDS = 120;
+/**
+ * 通行证有效期。刻意与 viewer 窗口解耦并保持很短——它只是"取证 → 建连"
+ * 这一瞬间的一次性凭据，有效期越短，被截获后的可用窗口越小。
+ * viewer 窗口另由 DO 依据 `live_poll_active_max_duration_sec` 决定。
+ */
+const VIEWER_TOKEN_TTL_MS = 60_000;
 const LIVE_VIEWER_WS_PROTOCOL = 'cf-monitor-viewer';
 const LOCAL_WS_RATE_LIMIT_SWEEP_EVERY = 256;
 
@@ -104,6 +109,7 @@ async function syncAgentNetworkMetadata(c: WsContext, client: db.ClientIdentity,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      source: 'agent',
       uuid: client.uuid,
       name: client.name || client.uuid,
       hidden: client.hidden,
@@ -199,10 +205,6 @@ async function enforceWsRateLimit(
   } catch {
     return localWsRateLimit(c, bucket, ip, max, windowMs, error, noStore);
   }
-}
-
-async function viewerTtlMs(_c: WsContext): Promise<number> {
-  return DEFAULT_VIEWER_TTL_SECONDS * 1000;
 }
 
 async function enforceViewerTokenRateLimit(c: WsContext, ip: string): Promise<Response | null> {
@@ -305,12 +307,11 @@ wsRoutes.get('/ws/live-token', async (c) => {
   const limited = await enforceViewerTokenRateLimit(c, ip);
   if (limited) return limited;
 
-  const ttlMs = await viewerTtlMs(c);
   c.header('Cache-Control', 'no-store');
   return c.json(await createViewerToken({
     ip,
     secret,
-    ttlMs,
+    ttlMs: VIEWER_TOKEN_TTL_MS,
   }));
 });
 
@@ -350,7 +351,7 @@ wsRoutes.get('/ws/live', async (c) => {
   url.search = '';
   url.searchParams.set('id', 'frontend-' + crypto.randomUUID());
   url.searchParams.set('role', 'viewer');
-  url.searchParams.set('viewer_ttl_ms', String(await viewerTtlMs(c)));
+  // 不再传 viewer_ttl_ms：窗口交由 DO 依据自己已缓存的设置决定。
   url.searchParams.set('viewer_ip', viewerIp);
   if (includeHidden) url.searchParams.set('include_hidden', '1');
 

@@ -25,11 +25,13 @@ import {
   validateBackup,
 } from '../utils/backup';
 import { buildBackupSnapshot } from '../utils/backup-snapshot';
+import { measureRestoredClientSnapshot } from '../utils/restore-client-snapshot';
 import { getCloudflareClientIp } from '../utils/request-ip';
 import { validatePingTaskInput } from '../utils/ping-task';
 import { generateAgentToken, validateClientCreateInput, validateClientUpdateInput } from '../utils/client';
 import { validateExpiryNotificationInput, validateLoadNotificationInput, validateOfflineNotificationInput } from '../utils/notification';
-import { NOTIFICATION_DISPATCH_SETTING_KEYS, dispatchNotification } from '../utils/notification-dispatch';
+import { NOTIFICATION_DISPATCH_SETTING_KEYS, dispatchNotification, pickNotificationSettingOverrides } from '../utils/notification-dispatch';
+import { maskSecretPreview, isMaskedSecretPreview } from '../utils/secret-preview';
 import { TELEGRAM_MESSAGE_MAX_CHARS } from '../utils/telegram';
 import { EMAIL_MESSAGE_MAX_CHARS } from '../utils/email';
 import { WEBHOOK_MESSAGE_MAX_CHARS } from '../utils/webhook';
@@ -63,6 +65,8 @@ import { getDatabase, type AppDatabase } from '../db/provider';
 import {
   bestEffortRecordHealthEvent,
   errorDetail,
+  healthComponentsOk,
+  markStaleEvents,
   readHealthEvents,
   type HealthEvent,
 } from '../utils/observability';
@@ -73,6 +77,7 @@ import {
   ESTIMATED_PING_SNAPSHOT_BYTES,
   buildQuotaReference,
 } from '../utils/quota';
+import { buildResourceEstimates } from '../utils/capacity-estimate';
 
 const adminRoutes = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 type AdminContext = Context<{ Bindings: Bindings; Variables: Variables }>;
@@ -101,6 +106,7 @@ const RECORD_PERSISTENCE_SETTING_KEYS = new Set([
   'record_persist_interval_sec',
   'ping_record_persist_interval_sec',
   'record_high_watermark_rows',
+  'record_high_watermark_bytes',
 ]);
 const CAPACITY_ESTIMATE_SETTING_KEYS = [
   'record_enabled',
@@ -111,6 +117,7 @@ const CAPACITY_ESTIMATE_SETTING_KEYS = [
   'record_persist_interval_sec',
   'ping_record_persist_interval_sec',
   'record_high_watermark_rows',
+  'record_high_watermark_bytes',
   'audit_log_preserve_time',
   'capacity_daily_view_minutes',
 ];
@@ -134,7 +141,9 @@ const SETTINGS_SCOPE_KEYS = {
     'record_persist_interval_sec',
     'ping_record_persist_interval_sec',
     'record_high_watermark_rows',
+    'record_high_watermark_bytes',
     'capacity_daily_view_minutes',
+    'offline_confirm_rounds',
   ],
   notification: [
     'notification_method',
@@ -176,6 +185,12 @@ const DEFAULT_UNIFIED_PING_INTERVAL_SEC = 120;
 const MIN_UNIFIED_PING_INTERVAL_SEC = 60;
 const MAX_UNIFIED_PING_INTERVAL_SEC = 3600;
 const AGENT_BASIC_INFO_REPORTS_PER_DAY = 48;
+// 与 wrangler.toml 的 crons 配置保持一致（每 2 分钟一次）。
+const WORKER_CRON_INTERVAL_SEC = 120;
+// Cloudflare 对入站 WebSocket 消息按 20:1 折算计费（出站消息与协议 ping 免费）。
+const WEBSOCKET_MESSAGE_BILLING_RATIO = 20;
+// 实测：走遍所有后台页面一轮的 Worker 请求数。
+const ADMIN_TOUR_WORKER_REQUESTS = 23;
 const CAPACITY_COUNT_FAR_CHECK_SEC = 6 * 60 * 60;
 const CAPACITY_COUNT_NEAR_CHECK_SEC = 10 * 60;
 const CAPACITY_COUNT_CRITICAL_CHECK_SEC = 60;
@@ -189,6 +204,8 @@ type LiveClientMeta = Partial<Omit<db.Client, 'token' | 'token_hash'>> & Pick<db
 type AdminClientsSnapshot = {
   clients: Array<Omit<db.Client, 'token' | 'token_hash'>>;
   removed: string[];
+  updatedAt: number;
+  complete: boolean;
 };
 type HealthCheckBody = {
   ok: boolean;
@@ -418,16 +435,24 @@ async function readAdminClientsSnapshot(c: AdminContext): Promise<AdminClientsSn
     ? (body as { removed: unknown[] }).removed.filter((uuid): uuid is string => typeof uuid === 'string' && uuid.trim() !== '')
     : [];
   return clients && clients.every(item => item && typeof item === 'object')
-    ? { clients: clients as Array<Omit<db.Client, 'token' | 'token_hash'>>, removed }
+    ? { clients: clients as Array<Omit<db.Client, 'token' | 'token_hash'>>, removed,
+      updatedAt: Number((body as { updatedAt?: unknown }).updatedAt || 0),
+      complete: (body as { complete?: unknown }).complete !== false }
     : null;
 }
 
-async function writeAdminClientsSnapshot(c: AdminContext, clients: Array<Omit<db.Client, 'token' | 'token_hash'>>): Promise<void> {
-  await liveDataStub(c).fetch(new Request('https://do/admin-clients-snapshot', {
+async function writeAdminClientsSnapshot(
+  c: AdminContext,
+  clients: Array<Omit<db.Client, 'token' | 'token_hash'>>,
+  options: { expectedVersion?: number | null; confirmedRemoved?: string[]; mode?: 'reorder' } = {},
+): Promise<boolean> {
+  const response = await liveDataStub(c).fetch(new Request('https://do/admin-clients-snapshot', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clients }),
+    body: JSON.stringify({ clients, expected_version: options.expectedVersion,
+      confirmed_removed: options.confirmedRemoved, mode: options.mode }),
   }));
+  return response.ok;
 }
 
 function applyAdminClientsSnapshot(
@@ -437,6 +462,7 @@ function applyAdminClientsSnapshot(
   if (!snapshot) return clients;
   const removed = new Set(snapshot.removed);
   const byUuid = new Map(clients.map(client => [client.uuid, client]));
+  for (const uuid of removed) byUuid.delete(uuid);
   for (const client of snapshot.clients) {
     if (!removed.has(client.uuid)) byUuid.set(client.uuid, { ...byUuid.get(client.uuid), ...client });
   }
@@ -579,16 +605,27 @@ type WebsiteMonitorMetadataDetail = true | {
   reorder?: number[];
 };
 
+/**
+ * 网站监控的公开广播载荷。
+ *
+ * 广播默认投递给**所有**观众（含游客），而管理端写操作推的是完整 monitor 记录，
+ * 因此必须在此裁剪，否则「对游客隐藏」只是前端不渲染、数据仍在 WebSocket 帧里。
+ * - 勾了「对游客隐藏此监控」：整条不进公开载荷
+ * - 勾了「对游客隐藏地址」：url 置为 null
+ */
 function publicWebsiteMetadataDetail(detail: WebsiteMonitorMetadataDetail): WebsiteMonitorMetadataDetail {
-  if (detail === true || !detail.upsert) return detail;
-  return {
-    ...detail,
-    upsert: detail.upsert.map((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-      const { note: _privateNote, ...publicItem } = item as Record<string, unknown>;
-      return publicItem;
-    }),
-  };
+  if (detail === true) return true;
+  if (!Array.isArray(detail.upsert)) return detail;
+  const isRecord = (v: unknown): v is Record<string, unknown> =>
+    Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+  const upsert = detail.upsert
+    .filter(item => !(isRecord(item) && item.hidden === true))
+    .map(item => {
+      if (!isRecord(item)) return item;
+      const { note: _privateNote, ...publicItem } = item;
+      return item.hide_url === true ? { ...publicItem, url: null, domain: '', icon: '' } : publicItem;
+    });
+  return { ...detail, upsert };
 }
 const WEBSITE_MONITOR_REQUIRED_EDIT_FIELDS = [
   'name',
@@ -605,7 +642,12 @@ const WEBSITE_MONITOR_REQUIRED_EDIT_FIELDS = [
 
 function invalidateWebsiteMonitorPublicState(c: AdminContext, websites: WebsiteMonitorMetadataDetail = true): void {
   invalidateAdminPublicMetadata(c);
-  runAdminBackground(c, broadcastLiveMetadataChanged(c, { websites: publicWebsiteMetadataDetail(websites) }));
+  // 分两份投递：管理员收完整记录，游客收裁剪后的载荷
+  runAdminBackground(c, broadcastLiveMetadataChanged(c, { websites, audience: 'admin' }));
+  runAdminBackground(c, broadcastLiveMetadataChanged(c, {
+    websites: publicWebsiteMetadataDetail(websites),
+    audience: 'public',
+  }));
   runAdminBackground(c, refreshLiveAgentPolicy(c));
 }
 
@@ -905,7 +947,10 @@ async function buildHealthCheck(c: AdminContext, deep: boolean, cacheState: Heal
   const components: Record<string, HealthEvent | null> = {};
   const databaseProbe = healthEvent('database_connection_probe', 'ok', 'Supabase HTTP API/RPC configured', checkedAt);
   if (databaseProbe.status !== 'error') {
-    Object.assign(components, await readHealthEvents(database));
+    // 只给存储型事件标 stale：现算探针每次请求都是新鲜的，标了没有意义，
+    // 更不能让一个当场算出来的 error 被判成陈旧而漏报。所以标记必须在这里做完，
+    // 下面那些 probe 是标记之后才写进 components 的。
+    Object.assign(components, markStaleEvents(await readHealthEvents(database), Date.parse(checkedAt)));
   }
   components.database_connection_probe = databaseProbe;
 
@@ -919,8 +964,9 @@ async function buildHealthCheck(c: AdminContext, deep: boolean, cacheState: Heal
   components.do_binding_probe = await runDoProbe(c, checkedAt);
   components.rate_limit_probe = await runRateLimitProbe(c, checkedAt);
   components.secret_probe = runSecretProbe(c.env, checkedAt);
-  const ok = databaseProbe.status !== 'error' &&
-    Object.values(components).every(event => !event || event.status !== 'error');
+  // status 保持原样（陈旧不等于没发生过，详情页仍要看得到），
+  // 只是不再让它拉红整个端点。
+  const ok = databaseProbe.status !== 'error' && healthComponentsOk(components);
 
   return {
     body: {
@@ -1097,10 +1143,14 @@ export async function buildCapacityEstimate(database: db.QueryDatabase, options:
     };
   }
 
-  const [clientCapacityCounts, rawSettings, pingTasks] = await Promise.all([
+  const [clientCapacityCounts, rawSettings, pingTasks, historyByteSizes, historyStorageUsage] = await Promise.all([
     db.countClientCapacityTargets(database),
     db.getSettingsByKeys(database, CAPACITY_ESTIMATE_SETTING_KEYS),
     db.listPingTaskEstimateRows(database),
+    // Physical allocation is a diagnostic; live usage is the recoverable budget.
+    // The latter scans visible tuples, so the complete response is cached for 30s.
+    db.getHistoryStorageBytes(database).catch(() => null),
+    db.getHistoryStorageUsage(database).catch(() => null),
   ]);
   const clientCount = clientCapacityCounts.clients;
   const gpuClientCount = clientCapacityCounts.gpu_clients;
@@ -1115,7 +1165,10 @@ export async function buildCapacityEstimate(database: db.QueryDatabase, options:
     MAX_UNIFIED_PING_INTERVAL_SEC,
     Math.max(MIN_UNIFIED_PING_INTERVAL_SEC, parsePositiveNumber(settings.ping_record_persist_interval_sec, DEFAULT_UNIFIED_PING_INTERVAL_SEC)),
   );
-  const highWatermarkRows = Math.min(10_000_000, Math.max(1_000, parsePositiveNumber(settings.record_high_watermark_rows, 450_000)));
+  const highWatermarkRows = Math.min(10_000_000, Math.max(1_000, parsePositiveNumber(settings.record_high_watermark_rows, 700_000)));
+  // 字节熔断线：与 DO 侧 RECORD_HIGH_WATERMARK_{MIN,MAX}_BYTES 用同一组边界，
+  // 面板显示的阈值必须等于真正生效的那个值，否则用户照着面板调也调不到点上。
+  const highWatermarkBytes = Math.min(549_755_813_888, Math.max(16_777_216, parsePositiveNumber(settings.record_high_watermark_bytes, 419_430_400)));
   const auditPreserveHours = Math.max(24, parsePositiveNumber(settings.audit_log_preserve_time, 2160));
   const effectiveActiveIntervalSec = Math.max(sampleIntervalSec, persistIntervalSec);
   const effectiveIdleIntervalSec = Math.max(idleIntervalSec, persistIntervalSec);
@@ -1137,6 +1190,7 @@ export async function buildCapacityEstimate(database: db.QueryDatabase, options:
     : 0;
   const gpuSnapshotsPerDay = activeGpuSnapshotsPerDay + idleGpuSnapshotsPerDay;
   let legacyPingRecordsPerDay = 0;
+  let pingTaskStateWritesPerDay = 0;
 
   const pingTasksWithEstimates = pingTasks.map((task) => {
     const targetClientCount = task.all_clients
@@ -1144,6 +1198,7 @@ export async function buildCapacityEstimate(database: db.QueryDatabase, options:
       : parseJsonArray(task.clients).filter((uuid): uuid is string => typeof uuid === 'string').length;
     const writesPerDay = recordEnabled ? Math.ceil(targetClientCount * 86400 / unifiedPingIntervalSec) : 0;
     legacyPingRecordsPerDay += writesPerDay;
+    pingTaskStateWritesPerDay += writesPerDay;
     return {
       id: task.id,
       name: task.name,
@@ -1159,11 +1214,7 @@ export async function buildCapacityEstimate(database: db.QueryDatabase, options:
   const agentPingTaskPullsPerDay = estimateAgentPingTaskPullsPerDay(clientCount, pingTasks, unifiedPingIntervalSec);
   const agentBasicInfoReportsPerDay = clientCount * AGENT_BASIC_INFO_REPORTS_PER_DAY;
   const agentWebsocketConnectsPerDay = clientCount;
-  const estimatedWorkerRequestsPerDay =
-    agentPingTaskPullsPerDay +
-    pingResultReportsPerDay +
-    agentBasicInfoReportsPerDay +
-    agentWebsocketConnectsPerDay;
+  const cronInvocationsPerDay = Math.floor(86400 / WORKER_CRON_INTERVAL_SEC);
   const pingRecordsSavedPerDay = Math.max(0, legacyPingRecordsPerDay - pingRecordsPerDay);
   const totalEstimatedBusinessRowsPerDay = monitorRecordsPerDay + gpuSnapshotsPerDay + pingRecordsPerDay;
   const estimatedMonitorRecordsRetained = Math.ceil(monitorRecordsPerDay * recordPreserveHours / 24);
@@ -1174,6 +1225,13 @@ export async function buildCapacityEstimate(database: db.QueryDatabase, options:
   const estimatedStorageBytes = estimatedMonitorRecordsRetained * ESTIMATED_MONITOR_RECORD_BYTES
     + estimatedGpuSnapshotsRetained * ESTIMATED_GPU_SNAPSHOT_BYTES
     + estimatedPingRecordsRetained * ESTIMATED_PING_SNAPSHOT_BYTES;
+  const resourceModel = buildResourceEstimates({
+    clientCount, activeSecondsPerDay, sampleIntervalSec, idleIntervalSec, monitorRecordsPerDay,
+    pingTaskStateWritesPerDay, pingTaskPullsPerDay: agentPingTaskPullsPerDay,
+    pingResultReportsPerDay, basicInfoReportsPerDay: agentBasicInfoReportsPerDay,
+    connectionsPerDay: agentWebsocketConnectsPerDay, cronInvocationsPerDay,
+    estimatedSupabaseStorageBytes: estimatedStorageBytes,
+  });
   const capacityCountCheckIntervalSec = recordEnabled
     ? estimateCapacityCountCheckIntervalSec(estimatedRowsRetained, highWatermarkRows)
     : 0;
@@ -1195,6 +1253,7 @@ export async function buildCapacityEstimate(database: db.QueryDatabase, options:
     record_persist_interval_sec: persistIntervalSec,
     ping_record_persist_interval_sec: unifiedPingIntervalSec,
     record_high_watermark_rows: highWatermarkRows,
+    record_high_watermark_bytes: highWatermarkBytes,
     capacity_daily_view_minutes: dailyViewMinutes,
     active_seconds_per_day: activeSecondsPerDay,
     idle_seconds_per_day: idleSecondsPerDay,
@@ -1216,7 +1275,10 @@ export async function buildCapacityEstimate(database: db.QueryDatabase, options:
     agent_ping_task_pulls_per_day: agentPingTaskPullsPerDay,
     agent_basic_info_reports_per_day: agentBasicInfoReportsPerDay,
     agent_websocket_connects_per_day: agentWebsocketConnectsPerDay,
-    estimated_worker_requests_per_day: estimatedWorkerRequestsPerDay,
+    ...resourceModel,
+    websocket_message_billing_ratio: WEBSOCKET_MESSAGE_BILLING_RATIO,
+    cron_invocations_per_day: cronInvocationsPerDay,
+    admin_tour_worker_requests: ADMIN_TOUR_WORKER_REQUESTS,
     estimated_monitor_records_retained: estimatedMonitorRecordsRetained,
     estimated_gpu_snapshots_retained: estimatedGpuSnapshotsRetained,
     estimated_ping_records_retained: estimatedPingRecordsRetained,
@@ -1228,6 +1290,12 @@ export async function buildCapacityEstimate(database: db.QueryDatabase, options:
     row_counts_capped: rowCounts?.bounded_row_counts?.capped ?? null,
     row_counts_limit: rowCounts?.bounded_row_counts?.limit ?? null,
     expired_row_counts: rowCounts?.expired_row_counts ?? null,
+    // Physical diagnostics stay separate from the live data budget below.
+    history_byte_sizes: historyByteSizes ?? null,
+    history_total_bytes: historyByteSizes?.total ?? null,
+    // Allocated files can remain large after DELETE. The live estimate is the
+    // recoverable history budget; physical allocation remains a diagnostic.
+    history_storage_usage: historyStorageUsage ?? null,
     row_counts_checked_at: rowCounts?.checked_at ?? null,
     row_counts_cache_seconds: rowCounts ? CAPACITY_ROW_COUNT_CACHE_MS / 1000 : 0,
     row_counts_cache_key: rowCounts?.cache_key ?? null,
@@ -1265,16 +1333,18 @@ async function runMaintenanceCleanup(database: db.QueryDatabase, username: strin
   const cleanupOptions = {
     maxBatches: Math.min(1000, Math.max(200, Math.ceil(maxExpiredBacklog / 100))),
   };
-  const deleted = {
-    ...(await db.deleteOldRecords(database, before.records, cleanupOptions)),
-    ...(await db.deleteOldPingRecords(database, before.ping_records, cleanupOptions)),
-    ...(await db.deleteOldAuditLogs(database, before.audit_logs, cleanupOptions)),
-  };
+  const { has_more: recordsMore, ...recordDeleted } = await db.deleteOldRecords(database, before.records, cleanupOptions);
+  const { has_more: pingMore, ...pingDeleted } = await db.deleteOldPingRecords(database, before.ping_records, cleanupOptions);
+  const { has_more: auditMore, ...auditDeleted } = await db.deleteOldAuditLogs(database, before.audit_logs, cleanupOptions);
+  const { has_more: websitesMore, ...websiteDeleted } = await db.deleteOldWebsiteChecks(database, before.records, cleanupOptions);
+  const hasMore = recordsMore || pingMore || auditMore || websitesMore;
+  const deleted = { ...recordDeleted, ...pingDeleted, ...auditDeleted, ...websiteDeleted };
   const orphanCleanup = await db.cleanupOrphanClientData(database);
   const expiredBacklogAfter = await db.getExpiredRowCounts(database, before);
   invalidateCapacityEstimateCache();
   const result = {
     success: true,
+    has_more: hasMore,
     before,
     cleanup_options: cleanupOptions,
     deleted,
@@ -1282,7 +1352,7 @@ async function runMaintenanceCleanup(database: db.QueryDatabase, username: strin
     expired_backlog_before: expiredBacklogBefore,
     expired_backlog_after: expiredBacklogAfter,
   };
-  await db.insertAuditLog(database, username, 'maintenance_cleanup', `手动维护清理完成: ${JSON.stringify(result)}`);
+  await db.insertAuditLog(database, username, 'maintenance_cleanup', `手动维护清理${hasMore ? '已处理一批，仍有过期记录' : '完成'}: ${JSON.stringify(result)}`);
   return result;
 }
 
@@ -1393,29 +1463,31 @@ adminRoutes.get('/update-check', async (c) => {
 adminRoutes.get('/clients', async (c) => {
   const metrics: TimingMetric[] = [];
   const refresh = c.req.query('refresh') === '1' || c.req.query('refresh') === 'true';
-  let snapshot: AdminClientsSnapshot | null = null;
+  let snapshot = await timed(metrics, 'do_snapshot', () => readAdminClientsSnapshot(c));
+  const baseVersion = snapshot?.updatedAt ?? null;
   if (!refresh) {
-    snapshot = await timed(metrics, 'do_snapshot', () => readAdminClientsSnapshot(c));
-    if (snapshot && snapshot.removed.length === 0) {
+    if (snapshot && snapshot.complete && snapshot.removed.length === 0) {
       c.header('X-CF-VPS-Monitor-Admin-Clients-Cache', 'do-hit');
       c.header('Cache-Control', 'no-store');
       setServerTiming(c, metrics);
       return c.json(snapshot.clients);
     }
   }
-  let repairAdminClientsSnapshot = Boolean(snapshot && snapshot.removed.length > 0);
+  let repairAdminClientsSnapshot = Boolean(snapshot && (!snapshot.complete || snapshot.removed.length > 0));
   const cacheHit = !refresh && !repairAdminClientsSnapshot && Boolean(adminClientsCache && adminClientsCache.expiresAt > Date.now());
   const database = getDatabase(c.env);
   const clients = await timed(metrics, cacheHit ? 'memory_cache' : 'db_list_clients', () => listAdminClientsCached(database, refresh || repairAdminClientsSnapshot));
-  if (refresh) {
-    snapshot = await timed(metrics, 'do_snapshot', () => readAdminClientsSnapshot(c));
-    repairAdminClientsSnapshot = Boolean(snapshot && snapshot.removed.length > 0);
-  }
+  snapshot = await timed(metrics, 'do_snapshot_after_read', () => readAdminClientsSnapshot(c));
+  repairAdminClientsSnapshot = Boolean(snapshot && (!snapshot.complete || snapshot.removed.length > 0));
   const safeClients = applyAdminClientsSnapshot(clients.map(hideAdminClientToken), snapshot);
   if (!snapshot || repairAdminClientsSnapshot) {
     runAdminBackground(c, (async () => {
-      await writeAdminClientsSnapshot(c, safeClients);
-      await broadcastLiveMetadataChanged(c, { clients: { upsert: safeClients } });
+      const databaseIds = new Set(clients.map(client => client.uuid));
+      const saved = await writeAdminClientsSnapshot(c, safeClients, {
+        expectedVersion: baseVersion,
+        confirmedRemoved: (snapshot?.removed || []).filter(uuid => !databaseIds.has(uuid)),
+      });
+      if (saved) await broadcastLiveMetadataChanged(c, { clients: { upsert: safeClients } });
     })());
   }
   c.header('X-CF-VPS-Monitor-Admin-Clients-Cache', refresh ? 'refresh' : (repairAdminClientsSnapshot ? 'repair' : (cacheHit ? 'hit' : 'miss')));
@@ -1651,7 +1723,7 @@ adminRoutes.post('/clients/reorder', async (c) => {
     const updated = existingUuids.length > 0 ? await db.reorderClients(database, existingUuids) : 0;
     if (updated > 0) {
       const refreshedClients = (await listAdminClientsCached(database, true)).map(hideAdminClientToken);
-      await writeAdminClientsSnapshot(c, refreshedClients);
+      await writeAdminClientsSnapshot(c, refreshedClients, { mode: 'reorder' });
       await Promise.all([
         purgeAdminClientsEdgeCache(c),
         broadcastLiveMetadataChanged(c, {
@@ -2201,7 +2273,20 @@ adminRoutes.get('/settings', async (c) => {
       scoped.webhook_secret_set = settings.webhook_secret ? 'true' : 'false';
       scoped.webhook_headers_set = settings.webhook_headers_json ? 'true' : 'false';
       scoped.webhook_password_set = settings.webhook_password ? 'true' : 'false';
+      scoped.telegram_bot_token_set = settings.telegram_bot_token ? 'true' : 'false';
+      scoped.telegram_chat_id_set = settings.telegram_chat_id ? 'true' : 'false';
       scoped.webhook_url_host = webhookUrlHost(settings.webhook_url);
+      // 敏感项一律只下发掩码预览（两头明文、中间星号），原文不进 API 响应——
+      // 否则前端再怎么显示成星号，开发者工具里照样能看到原文。
+      scoped.telegram_bot_token_preview = maskSecretPreview(settings.telegram_bot_token);
+      // chat id 虽是标识符而非凭据，但它足以定位到具体的接收会话，
+      // 与 bot token 同等对待。个人 chat id 通常不足 12 位，会被整串打码。
+      scoped.telegram_chat_id_preview = maskSecretPreview(settings.telegram_chat_id);
+      scoped.email_smtp_password_preview = maskSecretPreview(settings.email_smtp_password);
+      scoped.webhook_secret_preview = maskSecretPreview(settings.webhook_secret);
+      scoped.webhook_password_preview = maskSecretPreview(settings.webhook_password);
+      delete scoped['telegram_bot_token'];
+      delete scoped['telegram_chat_id'];
       delete scoped['email_smtp_password'];
       delete scoped['webhook_url'];
       delete scoped['webhook_secret'];
@@ -2230,20 +2315,45 @@ adminRoutes.post('/settings', async (c) => {
     delete settingsBody.webhook_headers_set;
     delete settingsBody.webhook_password_set;
     delete settingsBody.webhook_url_host;
+    delete settingsBody.telegram_bot_token_set;
+    delete settingsBody.telegram_chat_id_set;
+    // 预览串是只读展示用的，绝不能被当成真实值写回
+    delete settingsBody.telegram_bot_token_preview;
+    delete settingsBody.telegram_chat_id_preview;
+    delete settingsBody.email_smtp_password_preview;
+    delete settingsBody.webhook_secret_preview;
+    delete settingsBody.webhook_password_preview;
     const clearWebhookUrl = settingsBody.webhook_url_clear === true || settingsBody.webhook_url_clear === 'true';
     const clearWebhookSecret = settingsBody.webhook_secret_clear === true || settingsBody.webhook_secret_clear === 'true';
+    const clearTelegramBotToken = settingsBody.telegram_bot_token_clear === true || settingsBody.telegram_bot_token_clear === 'true';
+    const clearTelegramChatId = settingsBody.telegram_chat_id_clear === true || settingsBody.telegram_chat_id_clear === 'true';
     delete settingsBody.webhook_url_clear;
     delete settingsBody.webhook_secret_clear;
+    delete settingsBody.telegram_bot_token_clear;
+    delete settingsBody.telegram_chat_id_clear;
+    // 兜底：万一前端把掩码预览当值回传，直接丢弃，避免把 "abcd********wxyz" 写进数据库
+    for (const key of ['telegram_bot_token', 'telegram_chat_id', 'email_smtp_password', 'webhook_secret', 'webhook_password']) {
+      if (isMaskedSecretPreview(settingsBody[key])) delete settingsBody[key];
+    }
     if (settingsBody.email_smtp_password === '') {
       delete settingsBody.email_smtp_password;
     }
+    // 空串表示「未改动」，回落到已保存值；要真正清空需显式带 _clear 标志
+    if (clearTelegramBotToken) settingsBody.telegram_bot_token = '';
+    else if (settingsBody.telegram_bot_token === '') delete settingsBody.telegram_bot_token;
+    if (clearTelegramChatId) settingsBody.telegram_chat_id = '';
+    else if (settingsBody.telegram_chat_id === '') delete settingsBody.telegram_chat_id;
     if (clearWebhookUrl) settingsBody.webhook_url = '';
     else if (settingsBody.webhook_url === '') delete settingsBody.webhook_url;
     if (clearWebhookSecret) settingsBody.webhook_secret = '';
     else if (settingsBody.webhook_secret === '') delete settingsBody.webhook_secret;
     if (settingsBody.webhook_headers_json === '') delete settingsBody.webhook_headers_json;
     if (settingsBody.webhook_password === '') delete settingsBody.webhook_password;
-    const normalized = sanitizeSettingsForStorage(settingsBody);
+    // 只有写入路径拦自指：读取路径（buildAdminSettings）不传 selfHost，
+    // 否则存量的坏值会在每次读取时被判无效、回落成默认值，等于静默清空用户配置。
+    const normalized = sanitizeSettingsForStorage(settingsBody, {
+      selfHost: new URL(c.req.url).hostname,
+    });
     if (!normalized.ok) {
       return c.json({ error: '设置校验失败', details: normalized.errors }, 400);
     }
@@ -2557,7 +2667,7 @@ adminRoutes.post('/account/mfa/setup', async (c) => {
     await auditLoginFailure(database, user.username, clientIp, 'invalid_mfa_setup_password', failedAt);
     return c.json({ error: '当前密码错误' }, 401);
   }
-  await clearLoginFailures(database, buckets);
+  await clearLoginFailures(database, buckets, states);
 
   const secret = generateTotpSecret();
   const encryptedSecret = await encryptTotpSecret(secret, user.uuid, c.env);
@@ -2610,7 +2720,7 @@ adminRoutes.post('/account/mfa/enable', async (c) => {
     await auditLoginFailure(database, user.username, clientIp, 'invalid_mfa_enrollment_code', failedAt);
     return c.json({ error: '验证码无效，请确认服务器时间准确' }, 401);
   }
-  await clearLoginFailures(database, buckets);
+  await clearLoginFailures(database, buckets, states);
 
   const recovery = await generateRecoveryCodes(c.env);
   const updated = await db.enableUserTotp(
@@ -2696,7 +2806,7 @@ adminRoutes.post('/account/mfa/step-up', async (c) => {
     return c.json({ code: 'MFA_INVALID', error: '验证码或恢复码无效' }, 401);
   }
 
-  await clearLoginFailures(database, buckets);
+  await clearLoginFailures(database, buckets, states);
   const token = await generateMfaToken({
     userId: user.uuid,
     username: user.username,
@@ -2942,6 +3052,8 @@ adminRoutes.post('/download/backup', async (c) => {
 
 // 上传备份恢复
 adminRoutes.post('/upload/backup', async (c) => {
+  let databaseRestored = false;
+  let realtimeSynchronized = false;
   try {
     const contentLength = Number(c.req.header('Content-Length') || '0');
     if (Number.isFinite(contentLength) && contentLength > MAX_BACKUP_BYTES) {
@@ -2991,6 +3103,17 @@ adminRoutes.post('/upload/backup', async (c) => {
       return c.json({ error: '备份校验失败', details: validated.errors }, 400);
     }
 
+    if (validated.backup.clients !== undefined) {
+      const snapshotSize = measureRestoredClientSnapshot(validated.backup.clients);
+      if (!snapshotSize.fits) {
+        return c.json({
+          error: '节点配置过大，无法安全恢复实时节点列表；请缩短备注、硬件描述或减少节点后重试。数据库未修改。',
+          database_restored: false,
+          estimated_snapshot_bytes: snapshotSize.estimatedBytes,
+          maximum_snapshot_bytes: snapshotSize.maximumBytes,
+        }, 413);
+      }
+    }
     const restored = summarizeBackup(validated.backup);
     if (dryRun) {
       return c.json({
@@ -3002,9 +3125,9 @@ adminRoutes.post('/upload/backup', async (c) => {
     }
 
     const database = getDatabase(c.env);
-    const beforeRestore = await buildBackupSnapshot(database);
+    const beforeRestore = await db.getBackupConfigurationSnapshot(database);
     await db.restoreBackupData(database, validated.backup);
-    const cleanup = await db.cleanupOrphanClientData(database);
+    databaseRestored = true;
     invalidateAdminClientsCache();
     invalidateAdminPingTasksCache();
     purgeAdminPingTasksEdgeCache(c);
@@ -3014,7 +3137,22 @@ adminRoutes.post('/upload/backup', async (c) => {
     invalidateAgentPingTaskCache();
     invalidateAllowedClientIdsCache();
     invalidateCapacityEstimateCache();
+    invalidateWebsiteMonitorPublicState(c);
+    if (validated.backup.clients !== undefined) {
+      const authoritativeClients = await db.listClients(database, true);
+      const synchronization = await liveDataStub(c).fetch(new Request('https://do/clients-restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clients: authoritativeClients.map(hideAdminClientToken) }),
+      }));
+      const result = await synchronization.json().catch(() => null);
+      if (!synchronization.ok || !result || typeof result !== 'object' || !('success' in result) || result.success !== true) {
+        throw new Error('Restored client state synchronization failed');
+      }
+    }
     await refreshLivePingTasks(c);
+    realtimeSynchronized = true;
+    const cleanup = await db.cleanupOrphanClientData(database);
 
     await db.insertAuditLog(
       database,
@@ -3042,6 +3180,16 @@ adminRoutes.post('/upload/backup', async (c) => {
       warnings: validated.warnings,
     });
   } catch {
+    if (databaseRestored) {
+      return c.json({
+        error: realtimeSynchronized
+          ? '数据库配置与实时状态已恢复，但后续清理或审计未完成。请重试确认。'
+          : '数据库配置已恢复，但实时状态与 Agent 认证同步未完成。请重试恢复以完成同步。',
+        database_restored: true,
+        realtime_synchronized: realtimeSynchronized,
+        retryable: true,
+      }, 500);
+    }
     return c.json({ error: '恢复失败' }, 500);
   }
 });
@@ -3062,7 +3210,11 @@ adminRoutes.post('/test/sendMessage', async (c) => {
     const requestedChannel = typeof body.channel === 'string' && body.channel.trim() !== ''
       ? body.channel.trim()
       : undefined;
-    const adminSettings = buildAdminSettings(await db.getSettingsByKeys(database, [...NOTIFICATION_DISPATCH_SETTING_KEYS]));
+    // 通知测试以「表单当前值」为准：请求体里带的配置覆盖已保存值，未带的回落到数据库。
+    // 覆盖项与已保存值一起过 buildAdminSettings，走同一套归一化，且本请求不写库。
+    const storedSettings = await db.getSettingsByKeys(database, [...NOTIFICATION_DISPATCH_SETTING_KEYS]);
+    const overrides = pickNotificationSettingOverrides(body.settings);
+    const adminSettings = buildAdminSettings({ ...storedSettings, ...overrides });
     selectedChannel = requestedChannel || adminSettings.notification_method;
     if (!['telegram', 'email', 'webhook', 'none'].includes(selectedChannel)) {
       return c.json({ error: '未知通知方式' }, 400);

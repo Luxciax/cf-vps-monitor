@@ -26,7 +26,8 @@ const statusLabels = {
   pending: '等待',
 } as const;
 
-function faviconUrl(url: string, customIcon?: string) {
+function faviconUrl(url: string | null, customIcon?: string) {
+  if (!url) return "";
   if (customIcon) return customIcon;
   try {
     return `${new URL(url).origin}/favicon.ico`;
@@ -36,7 +37,7 @@ function faviconUrl(url: string, customIcon?: string) {
 }
 
 function protocolLabel(monitor: WebsiteMonitorSummary) {
-  if (monitor.url.startsWith('tcp:')) return 'TCP';
+  if (monitor.method === 'TCP' || monitor.url?.startsWith('tcp:')) return 'TCP';
   const code = monitor.last_raw_status_code ?? monitor.last_status_code;
   return code ? `HTTP ${code}` : 'HTTP';
 }
@@ -90,7 +91,7 @@ export default function WebsiteAssetCard({
         <WebsiteAssetIcon monitor={monitor} icon={metadata.icon} />
         <div className="website-asset-heading">
           <div className="website-asset-title-row">
-            <a
+            {monitor.url ? <a
               href={monitor.url}
               target="_blank"
               rel="noopener noreferrer"
@@ -98,8 +99,8 @@ export default function WebsiteAssetCard({
               title={monitor.name}
             >
               {monitor.name}
-            </a>
-            <ExternalLink size={14} aria-hidden="true" />
+            </a> : <span>{monitor.name}</span>}
+            {monitor.url && <ExternalLink size={14} aria-hidden="true" />}
           </div>
           <div className="website-asset-classification">
             <span>{metadata.category}</span>
@@ -117,7 +118,7 @@ export default function WebsiteAssetCard({
 
       <div className="website-asset-copy">
         <p>{metadata.description}</p>
-        <a
+        {monitor.url ? <a
           className="website-asset-domain"
           href={monitor.url}
           target="_blank"
@@ -126,7 +127,7 @@ export default function WebsiteAssetCard({
           title={metadata.domain}
         >
           {metadata.domain}
-        </a>
+        </a> : <span className="website-asset-domain">地址已隐藏</span>}
       </div>
 
       <div className="website-asset-meta">
