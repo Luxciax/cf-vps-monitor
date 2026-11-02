@@ -1,4 +1,4 @@
-import { Miniflare, Log, LogLevel } from 'miniflare';
+import { Miniflare, Log, LogLevel, convertV4MiniflareOptions } from 'miniflare';
 import { build } from 'esbuild';
 import { readFile, mkdir, mkdtemp } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -93,7 +93,7 @@ export async function createRuntimeFixture({ persistDurableObjects = false, exte
         }
       },
     };
-    mf = new Miniflare(options);
+    mf = new Miniflare(convertV4MiniflareOptions(options));
     await mf.ready;
     return {
       database, mf, rpcCalls, outboundCalls,
@@ -106,7 +106,7 @@ export async function createRuntimeFixture({ persistDurableObjects = false, exte
       },
       async restart() {
         options.script += `\n// Test cold restart ${crypto.randomUUID()}\n`;
-        await mf.setOptions(options);
+        await mf.setOptions(convertV4MiniflareOptions(options));
         await mf.ready;
       },
       async close() { await mf.dispose(); await database.close(); },

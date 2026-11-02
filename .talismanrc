@@ -43,7 +43,7 @@ fileignoreconfig:
 - filename: worker/src/utils/secret-preview.test.mjs
   checksum: 8c8eb3715768cebf8dee63ff3eaca6ac9bde09a8657a1e17a916ee8734446b70
 - filename: package-lock.json
-  checksum: 1291d4e1549e2bccacb463dbf3ca204a102ce6e1a4aac2d26304a38a064c6a9d
+  checksum: 688d903c831b3c4b7b29d5cda93f67c023b875601979e4eb9621bbdfd88a81b0
 - filename: frontend/src/utils/publicHistory.ts
   checksum: b26761bab76ea3c919067ac49c3901ba858ee4aba57f6bf0d24d2afd548f1bf0
 - filename: README.md
@@ -187,7 +187,7 @@ fileignoreconfig:
 - filename: worker/src/auth/jwt.audit-isolation.test.mjs
   checksum: a27ef24c7c8842c35ad64972cce04167dd5767ee6289b30d86f596fd300b1f9f
 - filename: worker/worker-configuration.d.ts
-  checksum: af1b7a061ddd960dac140eeb44191d6f32df64fea79d520e590376d42089fa3f
+  checksum: 6a0cc3c5f7b6c0184dfc445a447fe35824cafd1def0976d0d16330371b5fc4b7
 - filename: frontend/src/pages/Instance.tsx
   checksum: 706c240294d8e06e83b24b8ac65440fae21e2da65fabd4e44f8285a3df57dd0e
 - filename: worker/src/db/supabase-api/website-check-order.reaudit.test.mjs

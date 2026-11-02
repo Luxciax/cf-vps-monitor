@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { Miniflare } from 'miniflare';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 // Resolve through the real consumer, so a hoisted, unused patched copy cannot
 // hide an older Sharp/native library still loaded by Miniflare.
@@ -11,7 +11,7 @@ const { gte } = createRequire(fromMiniflare.resolve('sharp'))('semver');
 
 test('V-S01 Miniflare loads a Sharp release patched for GHSA-rgj7-g3m4-5g8c', t => {
   t.diagnostic(`loaded Sharp ${sharp.versions.sharp}, libheif ${sharp.versions.heif}, libvips ${sharp.versions.vips}`);
-  assert.ok(gte(sharp.versions.sharp, '0.35.4'), 'the loaded Sharp release must include the upstream security patch');
+  assert.ok(gte(sharp.versions.sharp, '0.35.5'), 'the loaded Sharp release must include the upstream security patch');
 });
 
 test('V-S01 the actual loaded native libheif includes the advisory fix', () => {
@@ -23,7 +23,7 @@ test('V-S01 native workerd Images still decodes and resizes a synthetic AVIF', {
     width: 6, height: 4, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 },
   } }).avif({ lossless: true, chromaSubsampling: '4:4:4' }).toBuffer();
   assert.equal((await sharp(avif).metadata()).format, 'heif', 'the control exercises the native HEIF decoder');
-  const runtime = new Miniflare({
+  const runtime = new Miniflare(convertV4MiniflareOptions({
     modules: true,
     compatibilityDate: '2026-07-30',
     images: { binding: 'IMAGES' },
@@ -36,7 +36,7 @@ test('V-S01 native workerd Images still decodes and resizes a synthetic AVIF', {
         return output.response();
       }
     }`,
-  });
+  }));
   t.after(() => runtime.dispose());
   const response = await runtime.dispatchFetch('https://images.fixture.invalid/transform', {
     method: 'POST', body: avif, headers: { 'Content-Type': 'image/avif' },
