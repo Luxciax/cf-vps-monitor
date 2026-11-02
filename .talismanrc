@@ -1,0 +1,8 @@
+fileignoreconfig:
+- filename: supabase/migrations/7_website_delete_batches.sql
+  checksum: ec99381196a33c06a628d5b20071fcfe28ed979092b216bc88204202c9bf7f6d
+- filename: worker/src/generated/supabase-migrations.ts
+  checksum: 3cc145ccd4a71902eae5f50c31e50decc772b4a8ef0085ba4a17c9685f0a86a2
+- filename: worker/src/db/supabase-api/client.website-delete.test.mjs
+  checksum: df6510eba8c7e799d6143574477e3a45c263bb3ab4229c0c62661be402f7fd9a
+version: "1.0"

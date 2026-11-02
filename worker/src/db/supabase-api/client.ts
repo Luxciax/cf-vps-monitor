@@ -847,8 +847,18 @@ export function updateSupabaseWebsiteMonitorAndReturn(
   }).then(monitor => monitor ? normalizeWebsiteMonitor(monitor) : null);
 }
 
-export function deleteSupabaseWebsiteMonitor(env: SupabaseApiEnv, id: number): Promise<void> {
-  return callSupabaseRpc<void>(env, 'cfm_delete_website_monitor', { input_id: id });
+export async function deleteSupabaseWebsiteMonitor(env: SupabaseApiEnv, id: number): Promise<void> {
+  // Keep each database transaction bounded; one cascading delete can time out
+  // when a monitor has accumulated a large check history.
+  while (true) {
+    const result = await callSupabaseRpc<{ deleted: boolean; deleted_checks: number }>(
+      env, 'cfm_delete_website_monitor_batch', { input_id: id },
+    );
+    if (result?.deleted === true) return;
+    if (!Number.isInteger(result?.deleted_checks) || result.deleted_checks <= 0) {
+      throw new Error('Website monitor deletion made no progress.');
+    }
+  }
 }
 
 export function reorderSupabaseWebsiteMonitors(env: SupabaseApiEnv, ids: number[]): Promise<number> {
