@@ -127,6 +127,7 @@ npm run cfvm -- clients list
 1. 登录后台。
 2. 在“服务器”添加节点。
 3. 打开节点安装命令，选择 Unix 自动检测或 Windows。复制安装命令。请确认你的安装脚本指向的仓库有效且你已经在actions里运行了创建agent脚本的workflow。
+   - 本 fork 默认从 `Luxciax/cf-vps-monitor` 获取 Agent 安装脚本与 Release，避免修复后的 Agent 又回退到官方上游二进制。
 4. 在 VPS 上执行安装命令，等待 Agent 上线。
 5. 需要 Ping 监控时，在“Ping”创建任务。
 6. 需要网站监控时，在“网站”创建 HTTP/HTTPS 或 TCP 检测目标。
@@ -154,7 +155,7 @@ OpenRC 每次启动会准备服务账户专用日志并检查启动后进程存�
 卸载单个 Unix 实例：
 
 ```bash
-wget -qO- 'https://raw.githubusercontent.com/kadidalax/cf-vps-monitor/refs/heads/main/agent/install.sh' | sh -s -- --uninstall -i 实例ID
+wget -qO- 'https://raw.githubusercontent.com/Luxciax/cf-vps-monitor/refs/heads/main/agent/install.sh' | sh -s -- --uninstall -i 实例ID
 ```
 
 卸载单个 Windows 实例：
