@@ -127,7 +127,7 @@ npm run cfvm -- clients list
 1. 登录后台。
 2. 在“服务器”添加节点。
 3. 打开节点安装命令，选择 Unix 自动检测或 Windows。复制安装命令。请确认你的安装脚本指向的仓库有效且你已经在actions里运行了创建agent脚本的workflow。
-   - 本 fork 默认从 `Luxciax/cf-vps-monitor` 获取 Agent 安装脚本与 Release，避免修复后的 Agent 又回退到官方上游二进制。
+   - 本 fork 默认从 `Luxciax/cf-vps-monitor` 获取安装脚本/源码；由于当前 fork 尚无 Agent Release，预编译二进制暂时仍从 `kadidalax/cf-vps-monitor` Release 获取。建立 fork Release 后应切换 `CF_MONITOR_AGENT_RELEASE_REPOSITORY`。
 4. 在 VPS 上执行安装命令，等待 Agent 上线。
 5. 需要 Ping 监控时，在“Ping”创建任务。
 6. 需要网站监控时，在“网站”创建 HTTP/HTTPS 或 TCP 检测目标。

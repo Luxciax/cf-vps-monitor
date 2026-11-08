@@ -26,10 +26,10 @@ YES="0"
 KEEP_FILES="0"
 INSTALL_GHPROXY=""
 PROXY=""
-CF_MONITOR_REPOSITORY="Luxciax/cf-vps-monitor"
+CF_MONITOR_REPOSITORY="Luxciax/cf-vps-monitor"\nCF_MONITOR_RELEASE_REPOSITORY="kadidalax/cf-vps-monitor"
 CF_MONITOR_BRANCH="main"
 CF_MONITOR_RELEASE_TAG=""
-CF_MONITOR_RELEASE_BASE="https://github.com/${CF_MONITOR_REPOSITORY}/releases/latest/download"
+CF_MONITOR_RELEASE_BASE="https://github.com/${CF_MONITOR_RELEASE_REPOSITORY}/releases/latest/download"
 MOUNT_INCLUDE=""
 MOUNT_EXCLUDE=""
 CONTAINER_DISK_TOTAL_BYTES="0"
@@ -899,14 +899,14 @@ release_tag_is_safe() (
 
 set_release_base() {
   if [ -z "$CF_MONITOR_RELEASE_TAG" ]; then
-    CF_MONITOR_RELEASE_BASE="https://github.com/${CF_MONITOR_REPOSITORY}/releases/latest/download"
+    CF_MONITOR_RELEASE_BASE="https://github.com/${CF_MONITOR_RELEASE_REPOSITORY}/releases/latest/download"
     return
   fi
   if ! release_tag_is_safe "$CF_MONITOR_RELEASE_TAG"; then
     die "--release-tag must be a safe tag of at most 128 ASCII characters; build metadata requires vSemVer."
   fi
   release_path="$(printf '%s' "$CF_MONITOR_RELEASE_TAG" | sed 's/+/%2B/g')"
-  CF_MONITOR_RELEASE_BASE="https://github.com/${CF_MONITOR_REPOSITORY}/releases/download/${release_path}"
+  CF_MONITOR_RELEASE_BASE="https://github.com/${CF_MONITOR_RELEASE_REPOSITORY}/releases/download/${release_path}"
 }
 
 detect_binary_filename() {

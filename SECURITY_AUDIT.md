@@ -59,16 +59,21 @@ The fork's frontend install-command generator, bundled installer scripts, and Wo
 installer redirects still named `kadidalax/cf-vps-monitor`. That meant new nodes could
 bypass this fork's reviewed Agent code and trust a different repository/release path.
 
-Fix: all default Agent installer provenance in this fork now points to
-`Luxciax/cf-vps-monitor`. Existing branch-consistency tests verify the frontend and
-installer scripts use the same repository.
+Fix: installation scripts and source fallback now originate from
+`Luxciax/cf-vps-monitor`. Because this fork currently has no Agent Release, prebuilt
+binaries remain explicitly sourced from `kadidalax/cf-vps-monitor` through a separate
+release-repository constant. Regression tests require the frontend and all installers
+to agree on both source and release repositories.
 
 ## Residual risks / recommendations
 
-### Medium: installer supply-chain trust is GitHub-centric
+### Medium: prebuilt Agent binaries still trust the upstream GitHub Release
 
-SHA256SUMS protects against corruption, but a compromised repository/release account
-can replace both the binary and checksum because they share the same trust root.
+This fork currently has no Agent Release. Its installation logic and source fallback
+are now fork-controlled, but the default prebuilt binaries and SHA256SUMS still come
+from `kadidalax/cf-vps-monitor`. SHA256SUMS protects against corruption, but a
+compromised upstream repository/release account can replace both the binary and
+checksum because they share the same trust root.
 
 Recommendation: publish Agent artifacts from the fork actually deployed, protect the
 release workflow, pin installer sources to a release/commit where practical, and

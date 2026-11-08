@@ -10,8 +10,8 @@ const commandSource = await readFile(new URL('./agentInstallCommand.ts', import.
 await writeFile(join(tmp, 'projectLinks.ts'), projectLinksSource);
 await writeFile(join(tmp, 'agentInstallCommand.ts'), commandSource.replace("from './projectLinks'", "from './projectLinks.ts'"));
 
-const { buildAgentInstallCommand, buildAgentUninstallAllCommand, defaultAgentInstallOptions } = await import(pathToFileURL(join(tmp, 'agentInstallCommand.ts')).href);
-const { CF_MONITOR_REPOSITORY } = await import(pathToFileURL(join(tmp, 'projectLinks.ts')).href);
+const { buildAgentInstallCommand, buildAgentUninstallAllCommand, cfMonitorAgentBinaryUrl, defaultAgentInstallOptions } = await import(pathToFileURL(join(tmp, 'agentInstallCommand.ts')).href);
+const { CF_MONITOR_AGENT_RELEASE_REPOSITORY, CF_MONITOR_REPOSITORY } = await import(pathToFileURL(join(tmp, 'projectLinks.ts')).href);
 
 const base = {
   serverUrl: 'https://panel.example',
@@ -47,6 +47,11 @@ assert.equal(
 assert.equal(
   buildAgentUninstallAllCommand({ platform: 'unix' }),
   `wget -qO- 'https://raw.githubusercontent.com/${CF_MONITOR_REPOSITORY}/refs/heads/main/agent/install.sh' | sh -s -- '--uninstall-all' '--yes'`,
+);
+
+assert.equal(
+  cfMonitorAgentBinaryUrl('unix'),
+  `https://github.com/${CF_MONITOR_AGENT_RELEASE_REPOSITORY}/releases/latest/download/cf-vps-monitor-agent-linux-amd64`,
 );
 
 await rm(tmp, { recursive: true, force: true });

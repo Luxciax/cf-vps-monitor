@@ -1,4 +1,4 @@
-import { CF_MONITOR_REPOSITORY } from './projectLinks';
+import { CF_MONITOR_AGENT_RELEASE_REPOSITORY, CF_MONITOR_REPOSITORY } from './projectLinks';
 
 export type AgentInstallPlatform = 'unix' | 'windows';
 
@@ -38,7 +38,7 @@ export const defaultAgentInstallOptions: AgentInstallOptions = {
 
 export const CF_MONITOR_BRANCH = 'main';
 export const CF_MONITOR_AGENT_SCRIPT_REF = `refs/heads/${CF_MONITOR_BRANCH}`;
-export const CF_MONITOR_RELEASE_BASE = `https://github.com/${CF_MONITOR_REPOSITORY}/releases/latest/download`;
+export const CF_MONITOR_RELEASE_BASE = `https://github.com/${CF_MONITOR_AGENT_RELEASE_REPOSITORY}/releases/latest/download`;
 export const CF_MONITOR_AGENT_SCRIPT_BASE = `https://raw.githubusercontent.com/${CF_MONITOR_REPOSITORY}/${CF_MONITOR_AGENT_SCRIPT_REF}/agent`;
 
 function isLocalHttpHost(hostname: string) {

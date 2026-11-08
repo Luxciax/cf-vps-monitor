@@ -35,6 +35,7 @@ const targets = [
   {
     file: 'install.sh',
     repo: /^CF_MONITOR_REPOSITORY="([^"]+)"/m,
+    releaseRepo: /^CF_MONITOR_RELEASE_REPOSITORY="([^"]+)"/m,
     branch: /^CF_MONITOR_BRANCH="([^"]+)"/m,
   },
   {
@@ -54,6 +55,7 @@ const seen = [];
 for (const target of targets) {
   const source = readFileSync(new URL(`./${target.file}`, import.meta.url), 'utf8');
   const repository = readConstant(source, target.repo, `${target.file} 的仓库常量`);
+  const releaseRepository = readConstant(source, target.releaseRepo, `${target.file} 的 Release 仓库常量`);
   const branch = readConstant(source, target.branch, `${target.file} 的分支常量`);
   const expected = expectedBranchFor(repository);
 
@@ -64,7 +66,7 @@ for (const target of targets) {
       + ` 该值用于 --build-from-source 的源码归档地址，写错会让整条路径 404。`,
   );
 
-  seen.push({ file: target.file, repository, branch });
+  seen.push({ file: target.file, repository, releaseRepository, branch });
 }
 
 // 三个脚本装的是同一个 agent，仓库与分支必须一致；
@@ -81,6 +83,11 @@ for (const other of rest) {
     first.branch,
     `${other.file} 的分支常量与 ${first.file} 不一致：${other.branch} vs ${first.branch}`,
   );
+  assert.equal(
+    other.releaseRepository,
+    first.releaseRepository,
+    `${other.file} 的 Release 仓库常量与 ${first.file} 不一致：${other.releaseRepository} vs ${first.releaseRepository}`,
+  );
 }
 
 // 与前端保持同源：后台展示的安装命令从该分支拉取 install.sh，
@@ -95,6 +102,11 @@ const frontendRepo = readConstant(
   /CF_MONITOR_REPOSITORY\s*=\s*'([^']+)'/,
   '前端的仓库常量',
 );
+const frontendReleaseRepo = readConstant(
+  frontendSource,
+  /CF_MONITOR_AGENT_RELEASE_REPOSITORY\s*=\s*'([^']+)'/,
+  '前端的 Agent Release 仓库常量',
+);
 assert.equal(
   frontendRepo,
   first.repository,
@@ -105,4 +117,9 @@ assert.equal(
   first.branch,
   `前端会从分支 ${expectedBranchFor(frontendRepo)} 拉取 install.sh，`
     + `而脚本内置分支是 ${first.branch}，两者必须一致`,
+);
+assert.equal(
+  frontendReleaseRepo,
+  first.releaseRepository,
+  `前端 Agent Release 仓库 ${frontendReleaseRepo} 与安装脚本 ${first.releaseRepository} 不一致`,
 );

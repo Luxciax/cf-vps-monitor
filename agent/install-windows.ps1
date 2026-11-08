@@ -236,7 +236,7 @@ function Assert-AgentSystemResources {
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repository = "Luxciax/cf-vps-monitor"
+$repository = "Luxciax/cf-vps-monitor"\n$releaseRepository = "kadidalax/cf-vps-monitor"
 $branch = "main"
 $autoBinaryUrl = $false
 
@@ -253,12 +253,12 @@ function Test-SafeReleaseTag {
 
 function Resolve-ReleaseBase {
   if ([string]::IsNullOrEmpty($ReleaseTag)) {
-    return "https://github.com/$repository/releases/latest/download"
+    return "https://github.com/$releaseRepository/releases/latest/download"
   }
   if (-not (Test-SafeReleaseTag $ReleaseTag)) {
     throw '-ReleaseTag must be a safe tag of at most 128 ASCII characters; build metadata requires vSemVer.'
   }
-  return "https://github.com/$repository/releases/download/$([Uri]::EscapeDataString($ReleaseTag))"
+  return "https://github.com/$releaseRepository/releases/download/$([Uri]::EscapeDataString($ReleaseTag))"
 }
 
 $releaseBase = Resolve-ReleaseBase
