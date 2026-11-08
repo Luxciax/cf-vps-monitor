@@ -11,6 +11,7 @@ const deployConfig = join(root, 'worker', '.tmp', 'wrangler-deploy.toml');
 const deploySecretsFile = join(root, 'worker', '.tmp', 'wrangler-secrets.json');
 const requiredSecrets = ['JWT_SECRET'];
 const supabaseSecretNames = ['SUPABASE_SECRET_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
+const optionalSecrets = ['ADMIN_API_TOKEN'];
 const deployArgs = process.argv.slice(2);
 const isDryRun = deployArgs.includes('--dry-run');
 const isWorkersBuild = process.env.WORKERS_CI === '1';
@@ -103,6 +104,18 @@ const { name: workerName, fromEnv: workerNameFromEnv } = resolveWorkerName();
 /** true 表示复用线上已有的 SUPABASE_URL：从生成的配置里省略它，并强制 --keep-vars。 */
 let reuseDeployedSupabaseUrl = false;
 
+function resolveAdminApiScopes() {
+  const raw = process.env.ADMIN_API_TOKEN_SCOPES?.trim();
+  if (!raw) return null;
+  const scopes = raw.split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+  const allowed = new Set(['read', 'write', 'backup', 'restore']);
+  if (scopes.length === 1 && scopes[0] === '*') return '*';
+  if (scopes.length === 0 || scopes.some(scope => !allowed.has(scope))) {
+    fail('ADMIN_API_TOKEN_SCOPES must be a comma-separated subset of read,write,backup,restore or exactly "*".');
+  }
+  return [...new Set(scopes)].join(',');
+}
+
 function resolveSupabaseUrl({ allowDryRunFallback = false } = {}) {
   const envUrl = process.env.SUPABASE_URL?.trim();
   const source = readFileSync(sourceConfig, 'utf8');
@@ -137,6 +150,7 @@ function resolveSupabaseUrl({ allowDryRunFallback = false } = {}) {
 function writeDeployConfig() {
   const source = readFileSync(sourceConfig, 'utf8');
   const supabaseUrl = resolveSupabaseUrl({ allowDryRunFallback: isDryRun });
+  const adminApiScopes = resolveAdminApiScopes();
   const commit = currentGitCommit();
   let generated = supabaseUrl === null
     // 整行删掉，配置里不含该变量 + --keep-vars ⇒ Cloudflare 保留线上已有值
@@ -145,6 +159,11 @@ function writeDeployConfig() {
   generated = /\nCURRENT_GIT_COMMIT\s*=/.test(generated)
     ? generated.replace(/CURRENT_GIT_COMMIT\s*=\s*"[^"]*"/, `CURRENT_GIT_COMMIT = "${commit}"`)
     : generated.replace(/(\[vars\]\s*)/, `$1\nCURRENT_GIT_COMMIT = "${commit}"\n`);
+  if (adminApiScopes) {
+    generated = /ADMIN_API_TOKEN_SCOPES\s*=/.test(generated)
+      ? generated.replace(/ADMIN_API_TOKEN_SCOPES\s*=\s*"[^"]*"/, `ADMIN_API_TOKEN_SCOPES = "${adminApiScopes}"`)
+      : generated.replace(/(\[vars\]\s*)/, `$1\nADMIN_API_TOKEN_SCOPES = "${adminApiScopes}"\n`);
+  }
   generated = generated
     .replace('main = "worker/src/index.ts"', 'main = "../src/index.ts"')
     .replace('directory = "frontend/dist"', 'directory = "../../frontend/dist"');
@@ -154,7 +173,7 @@ function writeDeployConfig() {
 
 function writeDeploySecretsFile() {
   const secrets = Object.fromEntries(
-    [...requiredSecrets, ...supabaseSecretNames]
+    [...requiredSecrets, ...supabaseSecretNames, ...optionalSecrets]
       .map(name => [name, process.env[name]?.trim() || ''])
       .filter(([, value]) => value),
   );

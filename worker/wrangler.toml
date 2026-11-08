@@ -35,6 +35,7 @@ new_sqlite_classes = ["RateLimitDO"]
 
 [vars]
 SUPABASE_URL = "https://PROJECT_REF.supabase.co"
+ADMIN_API_TOKEN_SCOPES = "read"
 
 [assets]
 directory = "../frontend/dist"

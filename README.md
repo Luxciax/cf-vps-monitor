@@ -119,6 +119,10 @@ npm run cfvm -- health
 npm run cfvm -- clients list
 ```
 
+如果使用 Cloudflare Workers Builds，可把 `ADMIN_API_TOKEN` 配为 Build Secret，
+把 `ADMIN_API_TOKEN_SCOPES` 配为 Build Variable；部署脚本会把 Token 安全转成 Worker Secret。
+实际 wrangler 配置默认 scope 为 `read`，Codex 需要修改操作时再显式设为 `read,write`。
+
 不要把 `restore` scope 给日常自动化 Token。机器 Token 永远不能修改管理员账号、
 密码或 MFA。完整接口与 CLI 用法见 [docs/API.md](docs/API.md)。
 

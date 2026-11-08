@@ -18,6 +18,11 @@ Store it as a Cloudflare Worker Secret:
 npx wrangler secret put ADMIN_API_TOKEN
 ```
 
+For Cloudflare Workers Builds, you can instead add `ADMIN_API_TOKEN` as a Build
+Secret and `ADMIN_API_TOKEN_SCOPES` as a Build Variable. The repository deploy
+wrapper forwards the optional token into the Worker secret set and validates the
+scope string before publishing.
+
 Configure `ADMIN_API_TOKEN_SCOPES` with a comma-separated list:
 
 - `read`: GET/HEAD/OPTIONS management endpoints.

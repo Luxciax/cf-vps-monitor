@@ -13,6 +13,7 @@ function runDeployment({ verificationStatus = 0, ciGateStatus = 0, buildStatus =
   const source = deploymentSource.replace(/^import .+;\r?$/gm, '').replaceAll('import.meta.url', JSON.stringify(deploymentUrl.href));
   const calls = [];
   const writes = [];
+  const fileWrites = [];
   class Exit extends Error { constructor(status) { super('fixture process exit'); this.status = status; } }
   const fakeProcess = { platform: process.platform, execPath: process.execPath, argv: ['node', fileURLToPath(deploymentUrl), ...args],
     env: { SUPABASE_URL: 'https://synthetic.supabase.co', JWT_SECRET: 'synthetic-jwt-secret', SUPABASE_SECRET_KEY: 'sb_secret_synthetic', ...env },
@@ -30,13 +31,13 @@ function runDeployment({ verificationStatus = 0, ciGateStatus = 0, buildStatus =
   try {
     new Function('mkdirSync', 'readFileSync', 'rmSync', 'writeFileSync', 'dirname', 'join', 'fileURLToPath', 'spawnSync', 'process', 'console', 'prepareCloudflareVerificationEnv', source)(
       path => writes.push(path),
-      () => 'name = "synthetic-worker"\nmain = "worker/src/index.ts"\n[vars]\nSUPABASE_URL = "https://PROJECT_REF.supabase.co"\n',
-      path => writes.push(path), path => writes.push(path), dirname, join, fileURLToPath, spawn, fakeProcess,
+      () => 'name = "synthetic-worker"\nmain = "worker/src/index.ts"\n[vars]\nSUPABASE_URL = "https://PROJECT_REF.supabase.co"\nADMIN_API_TOKEN_SCOPES = "read"\n',
+      path => writes.push(path), (path, content) => { writes.push(path); fileWrites.push({ path, content: String(content) }); }, dirname, join, fileURLToPath, spawn, fakeProcess,
       { log() {}, error() {} },
       () => { if (preparationFails) throw new Error('Synthetic tool preparation failure'); return fakeProcess.env; },
     );
   } catch (error) { if (!(error instanceof Exit)) throw error; status = error.status; }
-  return { status, calls, writes };
+  return { status, calls, writes, fileWrites };
 }
 
 test('AUD-19 behavior-test failure stops deployment before configuration or Wrangler side effects', () => {
@@ -122,4 +123,29 @@ test('AUD-19 GitHub release job cannot run after its same-checkout verification 
   assert.equal(ready({ verify: 'failure' }), false, 'failed CI must prevent release publication');
   assert.equal(ready({ verify: 'success' }), true);
   assert.ok(release.needs.every(name => jobs.has(name)), 'every required verification job is defined');
+});
+
+
+test('machine API deployment forwards optional token secret and validates scope override', () => {
+  const token = 'a'.repeat(64);
+  const result = runDeployment({
+    env: {
+      ADMIN_API_TOKEN: token,
+      ADMIN_API_TOKEN_SCOPES: 'read,write',
+    },
+  });
+  assert.equal(result.status, 0);
+
+  const secretFile = result.fileWrites.find(entry => entry.path.endsWith('wrangler-secrets.json'));
+  assert.ok(secretFile, 'deployment should materialize the Wrangler secrets file');
+  const secrets = JSON.parse(secretFile.content);
+  assert.equal(secrets.ADMIN_API_TOKEN, token);
+
+  const configFile = result.fileWrites.find(entry => entry.path.endsWith('wrangler-deploy.toml'));
+  assert.ok(configFile, 'deployment should materialize the Wrangler deploy config');
+  assert.match(configFile.content, /ADMIN_API_TOKEN_SCOPES\s*=\s*"read,write"/);
+
+  const invalid = runDeployment({ env: { ADMIN_API_TOKEN_SCOPES: 'read,root' } });
+  assert.notEqual(invalid.status, 0);
+  assert.equal(invalid.calls.some(call => call.args[0]?.endsWith('wrangler.js')), false);
 });
