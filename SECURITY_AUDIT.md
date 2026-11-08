@@ -53,6 +53,16 @@ Fix: `/api/v1/*` uses a separate high-entropy Bearer secret with explicit `read`
 `write`, `backup`, and `restore` scopes. Machine credentials cannot access
 account/password/MFA endpoints. The default scope is read-only.
 
+### Fork install provenance pointed back to upstream
+
+The fork's frontend install-command generator, bundled installer scripts, and Worker
+installer redirects still named `kadidalax/cf-vps-monitor`. That meant new nodes could
+bypass this fork's reviewed Agent code and trust a different repository/release path.
+
+Fix: all default Agent installer provenance in this fork now points to
+`Luxciax/cf-vps-monitor`. Existing branch-consistency tests verify the frontend and
+installer scripts use the same repository.
+
 ## Residual risks / recommendations
 
 ### Medium: installer supply-chain trust is GitHub-centric
