@@ -11,6 +11,7 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 - **Ping 监控**：支持 ICMP、TCP、HTTP Ping 任务，可分配到全部节点或指定节点，并展示延迟历史。
 - **网站监控**：支持 HTTP/HTTPS GET、HTTP/HTTPS HEAD 和 TCP 检测，支持期望状态码、超时、间隔、启停、隐藏、排序、手动检测和 Agent 节点侧探测。
 - **后台管理**：节点增删改、批量隐藏/删除、拖拽排序、记录清理、Agent Token 轮换、安装命令生成、系统设置、审计日志、健康检查、容量估算、备份恢复、账号改名和改密。
+- **机器 API / CLI**：`/api/v1/*` 使用独立 Bearer Token 与 scope，可供 Codex、脚本和 CLI 直接操作，不复用浏览器 Cookie/CSRF 会话。
 - **通知**：支持 Telegram 、 SMTP Email 和 Webhook，可配置离线、到期、负载以及网站监控相关通知。
 - **主题**：内置 `monitor` 和 `aurora` 主题，支持主题包、自定义 CSS、图片和字体资源。
 - **管理员恢复**：首次登录时创建管理员；忘记账号或密码时，可在登录页用当前部署的 Supabase Secret key 重置唯一管理员。
@@ -42,6 +43,8 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 | `SUPABASE_URL`        | Variable | Supabase Project URL，例如 `https://xxxx.supabase.co`                    |
 | `SUPABASE_SECRET_KEY` | Secret   | Supabase Secret key，通常以 `sb_secret_` 开头；不要填写 Publishable key、anon key |
 | `JWT_SECRET`          | Secret   | 后台会话签名密钥，必须至少 32 字节；英文/数字不少于 32 个字符                                   |
+| `ADMIN_API_TOKEN`      | Secret   | 可选机器 API Bearer Token，至少 32 字节；建议用 `npm run cfvm -- token generate` 生成               |
+| `ADMIN_API_TOKEN_SCOPES` | Variable | 可选机器 API 权限，默认 `read`；Codex 常用 `read,write`，备份/恢复需单独加 `backup`/`restore` |
 
 `SUPABASE_SERVICE_ROLE_KEY` 仅作为旧部署兼容变量保留；新部署请使用 `SUPABASE_SECRET_KEY`。
 
@@ -97,6 +100,27 @@ npm run deploy
 ```
 
 
+
+## 机器 API / CLI
+
+机器 API 默认关闭；只有设置 `ADMIN_API_TOKEN` 后才启用。未设置
+`ADMIN_API_TOKEN_SCOPES` 时默认为只读。Codex 自动化通常使用：
+
+```text
+ADMIN_API_TOKEN_SCOPES=read,write
+```
+
+本地调用：
+
+```bash
+export CFVM_URL=https://你的面板域名
+export CFVM_TOKEN=你的ADMIN_API_TOKEN
+npm run cfvm -- health
+npm run cfvm -- clients list
+```
+
+不要把 `restore` scope 给日常自动化 Token。机器 Token 永远不能修改管理员账号、
+密码或 MFA。完整接口与 CLI 用法见 [docs/API.md](docs/API.md)。
 
 ## 使用流程
 
@@ -191,10 +215,12 @@ cd agent && go test ./...
 
 - 后台登录使用 HttpOnly 会话 Cookie，非安全写请求需要 CSRF 校验。
 - 登录失败会记录限流状态和审计日志。
-- Agent 使用节点 Token 认证，后台可轮换节点 Token。
+- Agent 使用节点 Token 认证，后台可轮换节点 Token；WebSocket 仅接受 Authorization Bearer，不接受 URL query Token，并限制认证失败速率。
+- 机器 API 使用独立高熵 Bearer Secret 和 scope，默认只读，且禁止账号/密码/MFA 操作。
 - Ping 与网站探测会拦截内网、回环、链路本地、组播、保留地址和元数据地址。
 - Supabase 迁移启用 RLS，并对 RPC 函数显式 `revoke` / `grant`；需要 `security definer` 的函数固定 `search_path`。
 - 忘记密码重置需要输入当前部署的 Supabase Secret key；该 key 只用于本次请求校验，不会被保存。
+- Agent 与 Worker 双向 WebSocket 都有消息大小边界；完整源码级审计记录见 [SECURITY_AUDIT.md](SECURITY_AUDIT.md)。
 
 ## 许可证
 

@@ -32,6 +32,8 @@ new_sqlite_classes = ["RateLimitDO"]
 
 [vars]
 SUPABASE_URL = "https://PROJECT_REF.supabase.co"
+# Machine API defaults to read-only when this variable is omitted.
+ADMIN_API_TOKEN_SCOPES = "read"
 
 [assets]
 directory = "../frontend/dist"

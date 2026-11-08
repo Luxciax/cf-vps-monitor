@@ -2,3 +2,7 @@
 # 这里只放 Worker Secret；普通变量 SUPABASE_URL 由 wrangler.toml 的 [vars] 声明。
 SUPABASE_SECRET_KEY=replace-with-supabase-secret-key-sb_secret
 JWT_SECRET=replace-with-a-long-random-local-dev-secret-at-least-32-bytes
+
+# Optional CLI/Codex machine API. Use a random value at least 32 bytes long.
+# In production configure it with: npx wrangler secret put ADMIN_API_TOKEN
+ADMIN_API_TOKEN=replace-with-a-random-machine-api-token-at-least-32-bytes

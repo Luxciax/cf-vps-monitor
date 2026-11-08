@@ -12,6 +12,7 @@ import { getAgentClientIdentityByToken } from './client';
 import { getCloudflareClientIp, isPublicIpAddress } from '../utils/request-ip';
 import { readLiveSnapshot, readRateLimitResult } from '../utils/do-response';
 import { hasAdminSession, invalidatePublicMetadataCache } from './public';
+import { isAgentTokenShape } from '../utils/client';
 
 const wsRoutes = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 type WsContext = Context<{ Bindings: Bindings; Variables: Variables }>;
@@ -25,6 +26,9 @@ const VIEWER_TOKEN_RATE_LIMIT_MAX = 20;
 const LIVE_CLIENTS_RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_CLIENTS_RATE_LIMIT_MAX = 180;
 const LIVE_CLIENTS_CACHE_SECONDS = 2;
+const AGENT_WS_AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
+const AGENT_WS_AUTH_RATE_LIMIT_MAX = 120;
+const AGENT_WS_AUTH_FAILURE_RATE_LIMIT_MAX = 12;
 /**
  * 通行证有效期。刻意与 viewer 窗口解耦并保持很短——它只是"取证 → 建连"
  * 这一瞬间的一次性凭据，有效期越短，被截获后的可用窗口越小。
@@ -233,24 +237,57 @@ async function enforceLiveClientsRateLimit(c: WsContext, ip: string): Promise<Re
   );
 }
 
+async function enforceAgentWsAuthAttemptRateLimit(c: WsContext, ip: string): Promise<Response | null> {
+  return enforceWsRateLimit(
+    c,
+    'agent-ws-auth',
+    'agent-ws-auth-attempt',
+    ip,
+    AGENT_WS_AUTH_RATE_LIMIT_MAX,
+    AGENT_WS_AUTH_RATE_LIMIT_WINDOW_MS,
+    'Too many agent WebSocket authentication attempts',
+    true,
+  );
+}
+
+async function enforceAgentWsAuthFailureRateLimit(c: WsContext, ip: string): Promise<Response | null> {
+  return enforceWsRateLimit(
+    c,
+    'agent-ws-auth-failure',
+    'agent-ws-auth-failure',
+    ip,
+    AGENT_WS_AUTH_FAILURE_RATE_LIMIT_MAX,
+    AGENT_WS_AUTH_RATE_LIMIT_WINDOW_MS,
+    'Too many failed agent WebSocket authentication attempts',
+    true,
+  );
+}
+
 function jwtSecret(c: WsContext): string {
   return String(c.env.JWT_SECRET || '').trim();
 }
 
 wsRoutes.get('/clients/report', async (c) => {
-  const token = bearerToken(c) || String(c.req.query('token') || '').trim();
+  const token = bearerToken(c);
+  const sourceIp = getCloudflareClientIp(c, '');
 
-  if (!token) {
-    return c.json({ error: 'Missing token' }, 401);
+  const limited = await enforceAgentWsAuthAttemptRateLimit(c, sourceIp);
+  if (limited) return limited;
+
+  if (!token || !isAgentTokenShape(token)) {
+    const failed = await enforceAgentWsAuthFailureRateLimit(c, sourceIp);
+    if (failed) return failed;
+    return c.json({ error: token ? 'Invalid token' : 'Missing token' }, 401);
   }
 
   const database = getDatabase(c.env);
-  const client = await getAgentClientIdentityByToken(database, token, c.env, getCloudflareClientIp(c, ''));
+  const client = await getAgentClientIdentityByToken(database, token, c.env, sourceIp);
   if (!client) {
+    const failed = await enforceAgentWsAuthFailureRateLimit(c, sourceIp);
+    if (failed) return failed;
     return c.json({ error: 'Invalid token' }, 401);
   }
   const region = requestRegion(c);
-  const sourceIp = getCloudflareClientIp(c, '');
   const sourceIpIsPublic = isPublicIpAddress(sourceIp);
   if (region) {
     const storedClient = await db.getClient(database, client.uuid);

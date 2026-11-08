@@ -22,6 +22,7 @@ import { AuthConfigurationError, verifyAdminToken, type AdminJwtPayload } from '
 import { isMfaStepUpProtectedRequest } from './auth/mfa-policy';
 import { verifyMfaToken } from './auth/mfa-token';
 import { getAdminSessionToken, getMfaStepUpToken, verifyAdminCsrfToken } from './auth/session';
+import { authorizeAdminApiRequest } from './auth/admin-api-token';
 import { buildAdminSettings } from './settings/schema';
 import { bestEffortRecordHealthEvent, errorDetail, type StoredHealthComponent } from './utils/observability';
 import { NOTIFICATION_DISPATCH_SETTING_KEYS, deliverNotification, dispatchNotification } from './utils/notification-dispatch';
@@ -58,6 +59,8 @@ type RuntimeBindings = {
   SUPABASE_SECRET_KEY?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   JWT_SECRET?: string;
+  ADMIN_API_TOKEN?: string;
+  ADMIN_API_TOKEN_SCOPES?: string;
   SETUP_DIAGNOSTICS_ENABLED?: string;
   CURRENT_GIT_COMMIT?: string;
 };
@@ -177,7 +180,9 @@ function canServeWithoutDatabaseStartup(pathname: string): boolean {
     pathname === '/api/ws/live' ||
     pathname === '/api/ws/live-token' ||
     pathname === '/api/admin' ||
-    pathname.startsWith('/api/admin/');
+    pathname.startsWith('/api/admin/') ||
+    pathname === '/api/v1' ||
+    pathname.startsWith('/api/v1/');
 }
 
 type AppContext = Context<{ Bindings: Bindings; Variables: Variables }>;
@@ -325,6 +330,53 @@ app.route('/api/clients', clientRoutes);
 
 // WebSocket 路由
 app.route('/api', wsRoutes);
+
+// Machine API for CLI/Codex/automation. This deliberately reuses the same
+// privileged handlers as the browser admin UI instead of duplicating business logic.
+app.use('/api/v1/*', async (c, next): Promise<Response | undefined> => {
+  const auth = await authorizeAdminApiRequest({
+    authorization: c.req.header('Authorization'),
+    method: c.req.method,
+    pathname: c.req.path,
+    env: c.env,
+  });
+
+  if (!auth.ok) {
+    if (auth.reason === 'missing' || auth.reason === 'invalid') {
+      c.header('WWW-Authenticate', 'Bearer realm="cf-vps-monitor-api"');
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    if (auth.reason === 'insufficient_scope') {
+      return c.json({
+        error: 'Insufficient API token scope',
+        required_scope: auth.requiredScope,
+      }, 403);
+    }
+    if (auth.reason === 'forbidden') {
+      return c.json({ error: 'This operation is not available to machine API tokens' }, 403);
+    }
+    return c.json({
+      error: auth.reason === 'not_configured'
+        ? 'Machine API is disabled'
+        : 'Machine API token is misconfigured',
+    }, 503);
+  }
+
+  c.set('userId', 'api-token');
+  c.set('username', auth.principal);
+  c.header('X-CF-VPS-Monitor-Auth', 'api-token');
+  c.header('X-CF-VPS-Monitor-API-Scopes', auth.scopes.join(','));
+  await next();
+  return undefined;
+});
+
+app.route('/api/v1/themes', adminThemeRoutes);
+app.route('/api/v1', adminRoutes);
+
+app.post('/api/v1/cron/run', async (c) => {
+  await runScheduled(c.env);
+  return c.json({ success: true });
+});
 
 // 管理员 API，JWT 认证
 app.use('/api/admin/*', async (c, next): Promise<Response | undefined> => {

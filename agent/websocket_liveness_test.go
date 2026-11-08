@@ -402,3 +402,42 @@ func TestAUD24RepeatedSessionsLeaveNoSocketGoroutines(t *testing.T) {
 		t.Fatalf("socket goroutines grew from %d to %d after sessions exited", before, after)
 	}
 }
+
+
+func TestAUD25WebSocketReadLimitRejectsOversizedMessages(t *testing.T) {
+	peerDone := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		peer, err := (&websocket.Upgrader{}).Upgrade(w, request, nil)
+		if err != nil {
+			close(peerDone)
+			return
+		}
+		defer close(peerDone)
+		defer peer.Close()
+		_ = peer.WriteMessage(websocket.TextMessage, bytes.Repeat([]byte{'x'}, int(webSocketReadLimit)+1))
+	}))
+	defer server.Close()
+
+	endpoint, err := webSocketEndpoint(server.URL, "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := websocket.DefaultDialer.Dial(endpoint, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+
+	conn := &safeWebSocketConn{conn: raw}
+	if err := conn.configureLiveness(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("oversized WebSocket message was accepted")
+	}
+	select {
+	case <-peerDone:
+	case <-time.After(time.Second):
+		t.Fatal("oversized message peer did not stop")
+	}
+}

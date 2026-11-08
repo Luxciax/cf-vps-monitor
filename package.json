@@ -19,6 +19,7 @@
     "verify": "npm run lint && npm run build && npm test && npm run security:check",
     "verify:cloudflare": "node scripts/deploy-cloudflare.mjs --dry-run --outdir worker/.tmp/wrangler-dry-run --metafile worker/.tmp/wrangler-dry-run/metafile.json",
     "deploy": "node scripts/deploy-cloudflare.mjs",
+    "cfvm": "node scripts/cfvm.mjs",
     "dev:worker": "npm --prefix worker run dev",
     "dev:frontend": "npm --prefix frontend run dev"
   },

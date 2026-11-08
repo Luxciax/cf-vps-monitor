@@ -9,12 +9,14 @@ import (
 )
 
 const webSocketWriteTimeout = 10 * time.Second
+const webSocketReadLimit int64 = 512 * 1024
 
 // Configure once before starting the connection's reader and writers. After
 // that, only the reader (including its Pong handler) renews the read deadline.
 func (c *safeWebSocketConn) configureLiveness(heartbeatInterval time.Duration) error {
 	c.readTimeout = 3 * heartbeatInterval
 	c.writeTimeout = min(webSocketWriteTimeout, heartbeatInterval)
+	c.conn.SetReadLimit(webSocketReadLimit)
 	c.conn.SetPongHandler(func(string) error { return c.renewReadDeadline() })
 	return c.renewReadDeadline()
 }
