@@ -16,7 +16,9 @@ Required runtime configuration:
 | Name | Type | Purpose |
 | --- | --- | --- |
 | `SUPABASE_URL` | Variable | Supabase project URL |
-| `SUPABASE_SECRET_KEY` | Secret | Supabase Secret key |
+| `SUPABASE_SECRET_KEY` | Secret | Direct mode: Supabase Secret key |
+| `SUPABASE_PROXY_URL` | Variable | Proxy mode: Supabase Edge Function URL |
+| `SUPABASE_PROXY_TOKEN` | Secret | Proxy mode: random Worker-to-Edge proxy token |
 | `JWT_SECRET` | Secret | Browser admin session signing key, at least 32 bytes |
 
 Optional machine API configuration:
@@ -36,13 +38,17 @@ Recommended values:
 ```text
 NODE_VERSION=24
 SUPABASE_URL=https://PROJECT_REF.supabase.co
+# Direct mode:
 SUPABASE_SECRET_KEY=<secret>
+# Or proxy mode:
+# SUPABASE_PROXY_URL=https://PROJECT_REF.supabase.co/functions/v1/cfvm-db-proxy
+# SUPABASE_PROXY_TOKEN=<random 32-byte-or-longer token>
 JWT_SECRET=<random secret at least 32 bytes>
 ADMIN_API_TOKEN=<64 hex characters recommended>
 ADMIN_API_TOKEN_SCOPES=read,write
 ```
 
-`SUPABASE_SECRET_KEY`, `JWT_SECRET`, and `ADMIN_API_TOKEN` should be Secrets.
+`JWT_SECRET` and `ADMIN_API_TOKEN` should be Secrets. For database access, configure either direct mode (`SUPABASE_SECRET_KEY`) or proxy mode (`SUPABASE_PROXY_URL` + `SUPABASE_PROXY_TOKEN`). Proxy mode keeps the Supabase server key inside Supabase Edge Functions; the Worker prefers proxy mode when both are configured.
 
 Build command:
 
@@ -78,13 +84,26 @@ Authenticate Wrangler if needed:
 npx wrangler login
 ```
 
-Set the Supabase URL and Worker secrets:
+Set the Supabase URL and Worker secrets. Direct mode:
 
 ```bash
 export SUPABASE_URL=https://PROJECT_REF.supabase.co
 npx wrangler secret put SUPABASE_SECRET_KEY
 npx wrangler secret put JWT_SECRET
 ```
+
+Proxy mode keeps the Supabase server key inside Supabase Edge Functions. Deploy
+`supabase/functions/cfvm-db-proxy/index.ts`, generate a random proxy token, replace
+`EXPECTED_TOKEN_SHA256` with its SHA-256 verifier, then configure:
+
+```bash
+export SUPABASE_URL=https://PROJECT_REF.supabase.co
+export SUPABASE_PROXY_URL=https://PROJECT_REF.supabase.co/functions/v1/cfvm-db-proxy
+npx wrangler secret put SUPABASE_PROXY_TOKEN
+npx wrangler secret put JWT_SECRET
+```
+
+Do not configure `SUPABASE_SECRET_KEY` on the Worker in proxy-only mode.
 
 Enable the machine API:
 

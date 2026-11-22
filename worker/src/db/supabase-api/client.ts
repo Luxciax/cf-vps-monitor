@@ -10,6 +10,8 @@ export type SupabaseApiEnv = {
   SUPABASE_URL?: string;
   SUPABASE_SECRET_KEY?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
+  SUPABASE_PROXY_URL?: string;
+  SUPABASE_PROXY_TOKEN?: string;
 };
 
 export class SupabaseApiConfigurationError extends Error {
@@ -30,18 +32,32 @@ export class SupabaseApiError extends Error {
 }
 
 export function isSupabaseApiConfigured(env: SupabaseApiEnv): boolean {
-  return Boolean(env.SUPABASE_URL?.trim() && resolveSupabaseApiKey(env));
+  const proxy = readSupabaseProxyConfig(env);
+  return Boolean(proxy || (env.SUPABASE_URL?.trim() && resolveSupabaseApiKey(env)));
 }
 
 export function resolveSupabaseApiKey(env: SupabaseApiEnv): string {
   return env.SUPABASE_SECRET_KEY?.trim() || env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
 }
 
+function readSupabaseProxyConfig(env: SupabaseApiEnv): { url: string; token: string } | null {
+  const url = env.SUPABASE_PROXY_URL?.trim().replace(/\/+$/, '');
+  const token = env.SUPABASE_PROXY_TOKEN?.trim();
+  if (!url && !token) return null;
+  if (!url || !token) {
+    throw new SupabaseApiConfigurationError('SUPABASE_PROXY_URL and SUPABASE_PROXY_TOKEN must be configured together.');
+  }
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/functions\/v1\/[a-z0-9-]+$/i.test(url)) {
+    throw new SupabaseApiConfigurationError('SUPABASE_PROXY_URL must be a Supabase Edge Function URL.');
+  }
+  return { url, token };
+}
+
 function readSupabaseConfig(env: SupabaseApiEnv): { url: string; key: string } {
   const url = env.SUPABASE_URL?.trim().replace(/\/+$/, '');
   const key = resolveSupabaseApiKey(env);
   if (!url || !key) {
-    throw new SupabaseApiConfigurationError('SUPABASE_URL and SUPABASE_SECRET_KEY are required for Supabase Data API mode.');
+    throw new SupabaseApiConfigurationError('SUPABASE_URL and SUPABASE_SECRET_KEY are required for direct Supabase Data API mode.');
   }
   return { url, key };
 }
@@ -55,12 +71,53 @@ function supabaseRpcHeaders(key: string): Record<string, string> {
   };
 }
 
+async function callSupabaseProxy<T>(
+  env: SupabaseApiEnv,
+  operation: string,
+  payload: Record<string, unknown>,
+  fetcher: typeof fetch,
+): Promise<T> {
+  const proxy = readSupabaseProxyConfig(env);
+  if (!proxy) throw new SupabaseApiConfigurationError('Supabase proxy is not configured.');
+  const response = await scheduledFetch(proxy.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'X-CFVM-Proxy-Token': proxy.token,
+    },
+    body: JSON.stringify(payload),
+  }, fetcher);
+  if (!response.ok) {
+    const detail = sanitizeSupabaseDetail(await response.text().catch(() => ''), proxy.token);
+    throw new SupabaseApiError(operation, response.status, detail);
+  }
+  if (response.status === 204) return undefined as T;
+  return await response.json() as T;
+}
+
 async function callSupabaseTable<T>(
   env: SupabaseApiEnv,
   path: string,
   init: RequestInit = {},
   fetcher: typeof fetch = fetch,
 ): Promise<T> {
+  if (readSupabaseProxyConfig(env)) {
+    const headers = Object.fromEntries(new Headers(init.headers || {}).entries());
+    return callSupabaseProxy<T>(
+      env,
+      `table:${path.split('?')[0]}`,
+      {
+        kind: 'table',
+        path: path.replace(/^\/+/, ''),
+        method: String(init.method || 'GET').toUpperCase(),
+        headers,
+        body: typeof init.body === 'string' ? init.body : null,
+      },
+      fetcher,
+    );
+  }
+
   const { url, key } = readSupabaseConfig(env);
   const response = await scheduledFetch(`${url}/rest/v1/${path.replace(/^\/+/, '')}`, {
     ...init,
@@ -99,6 +156,15 @@ export async function callSupabaseRpc<T>(
   body: Record<string, unknown> = {},
   fetcher: typeof fetch = fetch,
 ): Promise<T> {
+  if (readSupabaseProxyConfig(env)) {
+    return callSupabaseProxy<T>(
+      env,
+      functionName,
+      { kind: 'rpc', functionName, body },
+      fetcher,
+    );
+  }
+
   const { url, key } = readSupabaseConfig(env);
   const response = await scheduledFetch(`${url}/rest/v1/rpc/${encodeURIComponent(functionName)}`, {
     method: 'POST',
@@ -178,7 +244,38 @@ export function getSupabasePublicSettings(env: SupabaseApiEnv): Promise<Record<s
 }
 
 export async function getSupabaseBackupConfigurationSnapshot(env: SupabaseApiEnv): Promise<BackupConfigurationSnapshot> {
-  const snapshot = await callSupabaseRpc<BackupConfigurationSnapshot>(env, 'cfm_backup_configuration_snapshot');
+  let snapshot: BackupConfigurationSnapshot;
+  try {
+    snapshot = await callSupabaseRpc<BackupConfigurationSnapshot>(env, 'cfm_backup_configuration_snapshot');
+  } catch (error) {
+    if (!isMissingRpc(error)) throw error;
+    const [
+      settings,
+      clients,
+      pingTasks,
+      offlineNotifications,
+      expiryNotifications,
+      loadNotifications,
+      websiteMonitors,
+    ] = await Promise.all([
+      getSupabasePublicSettings(env),
+      getSupabaseAdminClients(env),
+      getSupabasePublicPingTasks(env),
+      listSupabaseOfflineNotifications(env),
+      listSupabaseExpiryNotifications(env),
+      listSupabaseLoadNotifications(env),
+      listSupabaseWebsiteMonitors(env),
+    ]);
+    snapshot = {
+      settings,
+      clients,
+      ping_tasks: pingTasks,
+      offline_notifications: offlineNotifications,
+      expiry_notifications: expiryNotifications,
+      load_notifications: loadNotifications,
+      website_monitors: websiteMonitors,
+    };
+  }
   return {
     ...snapshot,
     clients: normalizeClientList(snapshot.clients),

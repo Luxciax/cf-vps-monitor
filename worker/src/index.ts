@@ -59,6 +59,8 @@ type RuntimeBindings = {
   SUPABASE_URL?: string;
   SUPABASE_SECRET_KEY?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
+  SUPABASE_PROXY_URL?: string;
+  SUPABASE_PROXY_TOKEN?: string;
   JWT_SECRET?: string;
   ADMIN_API_TOKEN?: string;
   ADMIN_API_TOKEN_SCOPES?: string;

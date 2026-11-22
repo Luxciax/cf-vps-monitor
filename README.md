@@ -41,12 +41,14 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 | 名称                    | 类型       | 说明                                                                    |
 | --------------------- | -------- | --------------------------------------------------------------------- |
 | `SUPABASE_URL`        | Variable | Supabase Project URL，例如 `https://xxxx.supabase.co`                    |
-| `SUPABASE_SECRET_KEY` | Secret   | Supabase Secret key，通常以 `sb_secret_` 开头；不要填写 Publishable key、anon key |
+| `SUPABASE_SECRET_KEY` | Secret   | 直连模式：Supabase Secret key，通常以 `sb_secret_` 开头；不要填写 Publishable key、anon key |
+| `SUPABASE_PROXY_URL` | Variable | 代理模式可选：`https://<ref>.supabase.co/functions/v1/cfvm-db-proxy` |
+| `SUPABASE_PROXY_TOKEN` | Secret | 代理模式可选：Worker 与受限 Edge Function 之间的随机 Bearer token |
 | `JWT_SECRET`          | Secret   | 后台会话签名密钥，必须至少 32 字节；英文/数字不少于 32 个字符                                   |
 | `ADMIN_API_TOKEN`      | Secret   | 可选机器 API Bearer Token，至少 32 字节；建议用 `npm run cfvm -- token generate` 生成               |
 | `ADMIN_API_TOKEN_SCOPES` | Variable | 可选机器 API 权限，默认 `read`；Codex 常用 `read,write`，备份/恢复需单独加 `backup`/`restore` |
 
-`SUPABASE_SERVICE_ROLE_KEY` 仅作为旧部署兼容变量保留；新部署请使用 `SUPABASE_SECRET_KEY`。
+`SUPABASE_SERVICE_ROLE_KEY` 仅作为旧部署兼容变量保留。数据库访问支持两种模式：默认直连模式使用 `SUPABASE_SECRET_KEY`；代理模式使用 `SUPABASE_PROXY_URL` + `SUPABASE_PROXY_TOKEN`，Worker 不再持有 Supabase 服务端 Secret。两组都存在时优先走代理。
 
 ## 面板部署
 
@@ -60,7 +62,7 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 3. Fork [本仓库](https://github.com/kadidalax/cf-vps-monitor)， 创建自己的仓库。到Actions 选择**Agent Release** 点击**Run workflow** 填入创建自己的版本号，再次点击**Run workflow** 创建自己仓库的Agent 安装脚本。
 4. 打开 Cloudflare Dashboard 的 **Workers & Pages**，点击 **创建应用程序**， 点击**Continue with GitHub**。
 5. 选择 GitHub 账号和刚创建的 Fork 仓库，点击**下一步**。
-6. 展开 **高级设置** 配置三个变量 `SUPABASE_URL`、`SUPABASE_SECRET_KEY`、`JWT_SECRET`。`JWT_SECRET` 必须至少 32 字节，英文/数字不少于 32 个字符。
+6. 展开 **高级设置** 配置 `SUPABASE_URL` 和 `JWT_SECRET`。数据库访问二选一：直连模式设置 `SUPABASE_SECRET_KEY`；代理模式先部署 `supabase/functions/cfvm-db-proxy/index.ts`，再设置 `SUPABASE_PROXY_URL` 与 Secret `SUPABASE_PROXY_TOKEN`。`JWT_SECRET` 必须至少 32 字节。
 7. 保持默认 **构建命令** `npm run build`，将 **部署命令** 设置为 `npm run deploy`。
 8. 点击 **部署**。
 9. 如果 Cloudflare 里创建的 Worker 名称不是 `cf-vps-monitor`，需要同步修改 Fork 仓库的 `wrangler.toml` 里的 `name`，两者必须一致。
@@ -77,7 +79,7 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 2. 打开 Supabase 项目 **Project Overview** 页面复制 `Project URL`；打开 **Project Settings -> API Keys -> Publishable and secret API keys**，复制 **Secret keys** 中的 `default` Secret key，格式通常为 `sb_secret_...`。
 3. 点击 上面的**Deploy to Cloudflare**。
 4. 登录 Cloudflare, 选择账号、仓库名和 Worker 名称。
-5. 填入对应变量的值 `SUPABASE_URL`、`SUPABASE_SECRET_KEY`、`JWT_SECRET`。`JWT_SECRET` 必须至少 32 字节，英文/数字不少于 32 个字符。
+5. 填入 `SUPABASE_URL`、`JWT_SECRET`，再选择数据库访问模式：直连模式填 `SUPABASE_SECRET_KEY`；代理模式填 `SUPABASE_PROXY_URL` 和 `SUPABASE_PROXY_TOKEN`。`JWT_SECRET` 必须至少 32 字节。
 6. 保持默认 **构建命令** `npm run build`，将 **部署命令** 设置为 `npm run deploy`。
 7. 点击 **部署**。
 8. 去 [Supabase](https://supabase.com/dashboard/account/tokens) 创建有效期 1 小时的 Access Token。
@@ -94,8 +96,15 @@ npm ci
 npm run build
 npx wrangler login
 $env:SUPABASE_URL="https://xxxx.supabase.co"
+# 直连模式
 npx wrangler secret put SUPABASE_SECRET_KEY
 npx wrangler secret put JWT_SECRET
+npm run deploy
+
+# 或代理模式：先部署 supabase/functions/cfvm-db-proxy/index.ts，
+# 再设置函数 URL 和与 EXPECTED_TOKEN_SHA256 对应的随机 token。
+$env:SUPABASE_PROXY_URL="https://xxxx.supabase.co/functions/v1/cfvm-db-proxy"
+npx wrangler secret put SUPABASE_PROXY_TOKEN
 npm run deploy
 ```
 

@@ -47,7 +47,7 @@ fileignoreconfig:
 - filename: frontend/src/utils/publicHistory.ts
   checksum: b26761bab76ea3c919067ac49c3901ba858ee4aba57f6bf0d24d2afd548f1bf0
 - filename: README.md
-  checksum: ae915042bf1c32f7a61a25b3808065f3ef2f6a099ee7c1994d72995777d42371
+  checksum: 00dbfa3a7a5adc2538b484984db074e2da30203fbaef7911989ea843dab839c1
 - filename: frontend/src/utils/reauth.ts
   checksum: 0520feb0b6c4d7bd62f99295a759a4f0ce7963fb3d43223d233a53f3a12228cd
 - filename: agent/container_disk_usage.go
@@ -193,19 +193,25 @@ fileignoreconfig:
 - filename: worker/src/db/supabase-api/website-check-order.reaudit.test.mjs
   checksum: f017632f99ce181e513b353a0d4e211347921c397f82ade8dcf752da7a05f6aa
 - filename: worker/src/routes/admin.ts
-  checksum: e55d57e390f2e37d8b91433bac036983749cda7e0ad55e75ff6f7e8f74ba4157
+  checksum: 18682349ef421a7ab354c627b548adff6c74875c37f5650df55bf1ba0558925f
 - filename: frontend/browser/helpers/harness.mjs
   checksum: c4eda7ab03c5c647ba486dd75e9715fac75ad9cdd4a710d840f4574f9e9e21f4
 - filename: worker/src/auth/viewer-token.test.mjs
   checksum: 80b4ac497095207b7575f0b5722f5117391ff73eaf3ff7ff1604cf508a8fa07e
 - filename: worker/src/routes/setup.audit-ownership.test.mjs
   checksum: fb6c6a2aaf08e05eb9f003f8ee3c2db5f9bea29913f0c5aabe4fd867287e7a22
+- filename: supabase/functions/cfvm-db-proxy/index.ts
+  checksum: 7fade99ed4b978b44e32d874d20096659978940f0658883bbc2b831fab8dcf9d
+- filename: docs/DEPLOY.md
+  checksum: 298696818520aab1e15b3414d8f14fd9c992e597aaf51c309a31543cc8250b49
+- filename: worker/src/db/supabase-api/client.proxy.test.mjs
+  checksum: c7ed7aaa7861c8f7cef2b3713059d54e017580d5a379e3f7146f4584f32a3950
 - filename: worker/src/index.reaudit-delivery-cleanup.test.mjs
   checksum: 53f9e74f053dc5ab47cd396dfad0734417f0bbc1d5a0dd4dbba2f2e3d9fde0f4
 - filename: worker/src/db/supabase-api/website-assets-merge.test.mjs
   checksum: 6e9c4d7ab587890107f0ca3e4d8fdebbd017789c8c519a8c27283bc379c8a454
 - filename: scripts/deploy-cloudflare.mjs
-  checksum: 434424763bb4bf1178e215d204300b738096300c831bf7a1c8925231a7ca77b0
+  checksum: 730be575e502c2d72be255b7824c141f7feffbf5a1bdd48ae2a7cc9101a56008
 - filename: scripts/test-support/notifications.mjs
   checksum: eac4ba6ec3be5be63edc33e3029e7b50a6ca0d68968330d44c0f982109b61082
 - filename: worker/src/index.reaudit-website-notification.test.mjs
@@ -229,7 +235,7 @@ fileignoreconfig:
 - filename: worker/src/index.scheduled-budget.test.mjs
   checksum: 7fe7e6e8f737f397ef563ffe1439906c330fabff5b2d12ce3e459188ced08f7a
 - filename: worker/src/index.ts
-  checksum: bb996334166296abb055c3df6a099f5bc1b2824693f7317697dc1d2cfd8edf50
+  checksum: 010ef19b2423a5d4cec9f04667bdc2aeb4673b842bcebbfe0f0bc649fddfb7bf
 - filename: scripts/deploy-gate.test.mjs
   checksum: 114cc9ed54244f98baa3b9fd22e87f9235498c2dffee5820cd6b83772798b1ca
 - filename: scripts/test-support/postgres.mjs

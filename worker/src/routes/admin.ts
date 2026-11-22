@@ -931,8 +931,10 @@ function runSecretProbe(env: Bindings, checkedAt: string): HealthEvent {
   if (new TextEncoder().encode(env.JWT_SECRET?.trim() || '').length < MIN_JWT_SECRET_BYTES) {
     missing.push('JWT_SECRET must be at least 32 bytes');
   }
-  if (!(env.SUPABASE_SECRET_KEY?.trim() || env.SUPABASE_SERVICE_ROLE_KEY?.trim())) {
-    missing.push('SUPABASE_SECRET_KEY is required');
+  const directSupabaseSecret = env.SUPABASE_SECRET_KEY?.trim() || env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const proxyConfigured = Boolean(env.SUPABASE_PROXY_URL?.trim() && env.SUPABASE_PROXY_TOKEN?.trim());
+  if (!(directSupabaseSecret || proxyConfigured)) {
+    missing.push('Supabase direct secret or proxy credentials are required');
   }
   if (missing.length > 0) {
     return healthEvent('secret_probe', 'error', missing.join('; '), checkedAt);
