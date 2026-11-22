@@ -55,6 +55,34 @@ function supabaseRpcHeaders(key: string): Record<string, string> {
   };
 }
 
+async function callSupabaseTable<T>(
+  env: SupabaseApiEnv,
+  path: string,
+  init: RequestInit = {},
+  fetcher: typeof fetch = fetch,
+): Promise<T> {
+  const { url, key } = readSupabaseConfig(env);
+  const response = await scheduledFetch(`${url}/rest/v1/${path.replace(/^\/+/, '')}`, {
+    ...init,
+    headers: {
+      ...supabaseRpcHeaders(key),
+      ...(init.headers || {}),
+    },
+  }, fetcher);
+  if (!response.ok) {
+    const detail = sanitizeSupabaseDetail(await response.text().catch(() => ''), key);
+    throw new SupabaseApiError(`table:${path.split('?')[0]}`, response.status, detail);
+  }
+  if (response.status === 204) return undefined as T;
+  return await response.json() as T;
+}
+
+function isMissingRpc(error: unknown): error is SupabaseApiError {
+  return error instanceof SupabaseApiError
+    && error.status === 404
+    && /PGRST202|Could not find the function/i.test(error.message);
+}
+
 function sanitizeSupabaseDetail(detail: string, key: string): string {
   return redactDatabaseSecrets(detail).replaceAll(key, '[REDACTED]').slice(0, 400);
 }
@@ -154,13 +182,61 @@ export async function getSupabaseBackupConfigurationSnapshot(env: SupabaseApiEnv
   };
 }
 
-export function getSupabaseSettingsByKeys(env: SupabaseApiEnv, keys: string[]): Promise<Record<string, string>> {
-  if (keys.length === 0) return Promise.resolve({});
-  return callSupabaseRpc<Record<string, string>>(env, 'cfm_settings_by_keys', { input_keys: [...new Set(keys)] });
+export async function getSupabaseSettingsByKeys(
+  env: SupabaseApiEnv,
+  keys: string[],
+  fetcher: typeof fetch = fetch,
+): Promise<Record<string, string>> {
+  if (keys.length === 0) return {};
+  const requested = [...new Set(keys)];
+  try {
+    return await callSupabaseRpc<Record<string, string>>(
+      env,
+      'cfm_settings_by_keys',
+      { input_keys: requested },
+      fetcher,
+    );
+  } catch (error) {
+    if (!isMissingRpc(error)) throw error;
+    const rows = await callSupabaseTable<Array<{ key?: unknown; value?: unknown }>>(
+      env,
+      'settings?select=key,value',
+      { method: 'GET' },
+      fetcher,
+    );
+    const allowed = new Set(requested);
+    return Object.fromEntries(rows
+      .filter((row): row is { key: string; value: string } => (
+        typeof row?.key === 'string'
+        && typeof row?.value === 'string'
+        && allowed.has(row.key)
+      ))
+      .map(row => [row.key, row.value]));
+  }
 }
 
-export function setSupabaseSettings(env: SupabaseApiEnv, settings: Record<string, string>): Promise<void> {
-  return callSupabaseRpc<void>(env, 'cfm_set_settings', { input_settings: settings });
+export async function setSupabaseSettings(
+  env: SupabaseApiEnv,
+  settings: Record<string, string>,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  if (Object.keys(settings).length === 0) return;
+  try {
+    await callSupabaseRpc<void>(env, 'cfm_set_settings', { input_settings: settings }, fetcher);
+    return;
+  } catch (error) {
+    if (!isMissingRpc(error)) throw error;
+    await callSupabaseTable<void>(
+      env,
+      'settings?on_conflict=key',
+      {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(Object.entries(settings).map(([key, value]) => ({ key, value }))),
+      },
+      fetcher,
+    );
+  }
 }
 
 export function getSupabasePublicClients(env: SupabaseApiEnv): Promise<PublicClientRow[]> {
