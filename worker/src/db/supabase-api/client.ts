@@ -521,12 +521,27 @@ export function markSupabaseLoadNotificationSent(
   });
 }
 
-export function cleanupSupabaseNotificationDeliveryState(
-  env: SupabaseApiEnv, now: string, options: NotificationDeliveryCleanupOptions = {},
+export async function cleanupSupabaseNotificationDeliveryState(
+  env: SupabaseApiEnv,
+  now: string,
+  options: NotificationDeliveryCleanupOptions = {},
+  fetcher: typeof fetch = fetch,
 ): Promise<NotificationDeliveryCleanupResult> {
-  return callSupabaseRpc<NotificationDeliveryCleanupResult>(env, 'cfm_cleanup_notification_delivery_state', {
-    input_now: now, input_batch_size: options.batchSize, input_max_batches: options.maxBatches,
-  });
+  try {
+    return await callSupabaseRpc<NotificationDeliveryCleanupResult>(
+      env,
+      'cfm_cleanup_notification_delivery_state',
+      {
+        input_now: now,
+        input_batch_size: options.batchSize,
+        input_max_batches: options.maxBatches,
+      },
+      fetcher,
+    );
+  } catch (error) {
+    if (!isMissingRpc(error)) throw error;
+    return { notification_delivery_state: 0, has_more: false };
+  }
 }
 
 export function listSupabaseLoadNotifications(env: SupabaseApiEnv): Promise<LoadNotification[]> {
@@ -1265,15 +1280,26 @@ export function insertSupabaseAuditLog(
   });
 }
 
-export function trySupabaseClaimAuditThrottle(
+export async function trySupabaseClaimAuditThrottle(
   env: SupabaseApiEnv,
   key: string,
   now: string,
   throttleMs: number,
+  fetcher: typeof fetch = fetch,
 ): Promise<boolean> {
-  return callSupabaseRpc<boolean>(env, 'cfm_try_claim_audit_throttle', {
-    input_key: key,
-    input_now: now,
-    input_throttle_ms: throttleMs,
-  });
+  try {
+    return await callSupabaseRpc<boolean>(
+      env,
+      'cfm_try_claim_audit_throttle',
+      {
+        input_key: key,
+        input_now: now,
+        input_throttle_ms: throttleMs,
+      },
+      fetcher,
+    );
+  } catch (error) {
+    if (!isMissingRpc(error)) throw error;
+    return true;
+  }
 }
