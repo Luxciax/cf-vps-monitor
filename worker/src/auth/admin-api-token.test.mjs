@@ -45,6 +45,18 @@ test('machine API separates write, backup and restore privileges', async () => {
   assert.equal((await auth('/api/v1/upload/backup', 'POST', 'restore')).ok, true);
 });
 
+test('machine API treats DELETE as write and rejects invalid scope configuration', async () => {
+  assert.deepEqual(
+    await auth('/api/v1/clients/node-a', 'DELETE', 'read'),
+    { ok: false, reason: 'insufficient_scope', requiredScope: 'write' },
+  );
+  assert.equal((await auth('/api/v1/clients/node-a', 'DELETE', 'read,write')).ok, true);
+
+  for (const scopes of ['read,root', '*,write', 'write,*', ',,,']) {
+    assert.deepEqual(await auth('/api/v1/clients', 'GET', scopes), { ok: false, reason: 'misconfigured' });
+  }
+});
+
 test('machine API never exposes human account or MFA endpoints', async () => {
   assert.deepEqual(
     await auth('/api/v1/account/chpasswd', 'POST', '*'),

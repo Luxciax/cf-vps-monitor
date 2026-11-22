@@ -103,6 +103,10 @@ npm run deploy
 
 ## 机器 API / CLI
 
+完整部署说明见 [docs/DEPLOY.md](docs/DEPLOY.md)，完整机器 API 说明见
+[docs/API.md](docs/API.md)。仓库根目录的 [AGENTS.md](AGENTS.md) 专门约束 Codex /
+自动化客户端优先使用 API/CLI，不要在接口可用时改走浏览器 UI。
+
 机器 API 默认关闭；只有设置 `ADMIN_API_TOKEN` 后才启用。未设置
 `ADMIN_API_TOKEN_SCOPES` 时默认为只读。Codex 自动化通常使用：
 
@@ -115,9 +119,15 @@ ADMIN_API_TOKEN_SCOPES=read,write
 ```bash
 export CFVM_URL=https://你的面板域名
 export CFVM_TOKEN=你的ADMIN_API_TOKEN
+npm run cfvm -- discover
 npm run cfvm -- health
 npm run cfvm -- clients list
+npm run cfvm -- clients remove <uuid>
 ```
+
+机器 API 还提供 `GET /api/v1/capabilities` 和 `GET /api/v1/openapi.json`。
+节点、Ping、网站监控提供标准 REST 风格的 POST/PATCH/DELETE 路径；标准 DELETE
+为幂等删除，目标已经不存在时也会成功返回 `already_absent: true`。
 
 如果使用 Cloudflare Workers Builds，可把 `ADMIN_API_TOKEN` 配为 Build Secret，
 把 `ADMIN_API_TOKEN_SCOPES` 配为 Build Variable；部署脚本会把 Token 安全转成 Worker Secret。

@@ -52,24 +52,26 @@ function readBearerToken(value: string | undefined): string {
   return match?.[1] || '';
 }
 
-function configuredScopes(raw: string | undefined): AdminApiScope[] {
+function configuredScopes(raw: string | undefined): { ok: true; scopes: AdminApiScope[] } | { ok: false } {
   const normalized = String(raw || '').trim();
-  if (!normalized) return ['read'];
+  if (!normalized) return { ok: true, scopes: ['read'] };
 
   const requested = normalized
     .split(',')
     .map(item => item.trim().toLowerCase())
     .filter(Boolean);
 
-  if (requested.includes('*')) return ['read', 'write', 'backup', 'restore'];
+  if (requested.length === 1 && requested[0] === '*') {
+    return { ok: true, scopes: ['read', 'write', 'backup', 'restore'] };
+  }
+  if (requested.length === 0 || requested.includes('*')) return { ok: false };
 
   const scopes: AdminApiScope[] = [];
   for (const scope of requested) {
-    if (VALID_SCOPES.has(scope as AdminApiScope) && !scopes.includes(scope as AdminApiScope)) {
-      scopes.push(scope as AdminApiScope);
-    }
+    if (!VALID_SCOPES.has(scope as AdminApiScope)) return { ok: false };
+    if (!scopes.includes(scope as AdminApiScope)) scopes.push(scope as AdminApiScope);
   }
-  return scopes;
+  return scopes.length > 0 ? { ok: true, scopes } : { ok: false };
 }
 
 function relativeApiPath(pathname: string): string {
@@ -118,15 +120,16 @@ export async function authorizeAdminApiRequest(input: AdminApiAuthInput): Promis
     return { ok: false, reason: 'forbidden' };
   }
 
-  const scopes = configuredScopes(input.env.ADMIN_API_TOKEN_SCOPES);
-  if (!scopes.includes(required)) {
+  const configured = configuredScopes(input.env.ADMIN_API_TOKEN_SCOPES);
+  if (!configured.ok) return { ok: false, reason: 'misconfigured' };
+  if (!configured.scopes.includes(required)) {
     return { ok: false, reason: 'insufficient_scope', requiredScope: required };
   }
 
   return {
     ok: true,
     principal: `api:${fingerprint(expectedDigest)}`,
-    scopes,
+    scopes: configured.scopes,
     requiredScope: required,
   };
 }

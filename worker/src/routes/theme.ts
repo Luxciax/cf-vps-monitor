@@ -367,6 +367,30 @@ adminThemeRoutes.post('/delete', async (c) => {
   return c.json({ success: true, active_theme: activeTheme === short ? 'monitor' : activeTheme });
 });
 
+// Machine API canonical delete. Built-in themes stay protected; missing uploaded themes
+// are an idempotent success so automation can safely retry.
+adminThemeRoutes.delete('/:short', async (c) => {
+  const short = normalizeActiveTheme(c.req.param('short').trim());
+  if (!/^[A-Za-z0-9_-]+$/.test(short) || isBuiltinTheme(short)) {
+    return c.json({ error: '内置主题不能删除' }, 400);
+  }
+  const database = getDatabase(c.env);
+  const activeTheme = normalizeActiveTheme(await db.getSetting(database, 'active_theme'));
+  const deleted = await db.deleteTheme(database, short);
+  if (!deleted) {
+    return c.json({ success: true, short, already_absent: true, active_theme: activeTheme });
+  }
+  if (activeTheme === short) await db.setSetting(database, 'active_theme', 'monitor');
+  invalidatePublicMetadataCache();
+  await db.insertAuditLog(database, c.get('username')!, 'theme_delete_api', `API 删除主题: ${short}`);
+  return c.json({
+    success: true,
+    short,
+    already_absent: false,
+    active_theme: activeTheme === short ? 'monitor' : activeTheme,
+  });
+});
+
 publicThemeRoutes.get('/active.css', async (c) => {
   try {
     const database = getDatabase(c.env);

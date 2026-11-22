@@ -1638,6 +1638,84 @@ adminRoutes.post('/clients/:uuid/remove', async (c) => {
   return c.json({ success: true, removed: result.removed, deleted_records: result.deleted_records });
 });
 
+// Canonical machine API create/update aliases. Legacy POST paths remain for the web UI.
+adminRoutes.post('/clients', async (c) => {
+  const metrics: TimingMetric[] = [];
+  try {
+    const parsed = await timed(metrics, 'parse_body', () => readAdminJsonObject(c));
+    if (!parsed.ok) return parsed.response;
+    const validated = validateClientCreateInput(parsed.body);
+    if (!validated.ok) return c.json({ error: '客户端校验失败', details: validated.errors }, 400);
+
+    const { uuid, token, name } = validated.client;
+    const database = getDatabase(c.env);
+    let createdClient: db.Client;
+    try {
+      createdClient = await timed(metrics, 'db_create', () => db.createClient(database, { uuid, token, name }));
+    } catch (error) {
+      if (isClientUniqueConflict(error)) return c.json({ error: '客户端 UUID 或 Token 已存在' }, 409);
+      throw error;
+    }
+
+    const safeClient = hideAdminClientToken(createdClient);
+    invalidateAdminClientsCache();
+    const publicMetadataPurge = invalidateAdminPublicMetadata(c);
+    invalidateAgentClientAuthCache({ uuid, token });
+    invalidateAllowedClientIdsCache();
+    invalidateCapacityEstimateCache();
+    await timed(metrics, 'post_write_cache', async () => {
+      await Promise.all([
+        syncLiveClientMeta(c, safeClient).catch(() => undefined),
+        syncAgentAuthClient(c, createdClient).catch(() => undefined),
+        publicMetadataPurge.catch(() => undefined),
+        purgeAdminClientsEdgeCache(c),
+      ]);
+    });
+    runAdminBackground(c, db.insertAuditLog(database, c.get('username')!, 'client_add_api', `API 添加客户端: ${name}`));
+    setServerTiming(c, metrics);
+    return c.json({ success: true, uuid, token, client: safeClient }, 201);
+  } catch {
+    return c.json({ error: '创建失败' }, 500);
+  }
+});
+
+adminRoutes.patch('/clients/:uuid', async (c) => {
+  const metrics: TimingMetric[] = [];
+  try {
+    const uuid = c.req.param('uuid');
+    const parsed = await timed(metrics, 'parse_body', () => readAdminJsonObject(c));
+    if (!parsed.ok) return parsed.response;
+    const database = getDatabase(c.env);
+    const validated = validateClientUpdateInput(parsed.body);
+    if (!validated.ok) return c.json({ error: '客户端校验失败', details: validated.errors }, 400);
+    if (Object.keys(validated.client).length === 0) {
+      setServerTiming(c, metrics);
+      return c.json({ success: true, noop: true, changed: 0 });
+    }
+
+    const updatedClient = await timed(metrics, 'db_update', () => db.updateClientAndReturn(database, uuid, validated.client));
+    if (!updatedClient) return c.json({ error: '客户端不存在' }, 404);
+    const safeClient = hideAdminClientToken(updatedClient);
+    invalidateAdminClientsCache();
+    const publicMetadataPurge = invalidateAdminPublicMetadata(c);
+    invalidateAgentClientAuthCache({ uuid });
+    invalidateCapacityEstimateCache();
+    await timed(metrics, 'post_write_cache', async () => {
+      await Promise.all([
+        syncLiveClientMeta(c, safeClient).catch(() => undefined),
+        syncAgentAuthClient(c, updatedClient).catch(() => undefined),
+        publicMetadataPurge.catch(() => undefined),
+        purgeAdminClientsEdgeCache(c),
+      ]);
+    });
+    runAdminBackground(c, db.insertAuditLog(database, c.get('username')!, 'client_edit_api', `API 编辑客户端: ${uuid}`));
+    setServerTiming(c, metrics);
+    return c.json({ success: true, changed: 1, client: safeClient });
+  } catch {
+    return c.json({ error: '编辑失败' }, 500);
+  }
+});
+
 // 获取客户端 Token。管理列表不常驻下发，按需返回当前可用安装凭据。
 adminRoutes.post('/clients/:uuid/token', async (c) => {
   const uuid = c.req.param('uuid');
@@ -2021,6 +2099,81 @@ adminRoutes.post('/ping/delete', async (c) => {
   }
 });
 
+// Canonical machine API aliases for Ping tasks.
+adminRoutes.get('/pings', async (c) => {
+  const metrics: TimingMetric[] = [];
+  const refresh = c.req.query('refresh') === '1' || c.req.query('refresh') === 'true';
+  if (!refresh) {
+    const cached = await timed(metrics, 'edge_cache', () => getAdminPingTasksEdgeCache());
+    if (cached) {
+      setServerTiming(c, metrics);
+      return cached;
+    }
+  }
+  const database = getDatabase(c.env);
+  const cacheHit = !refresh && Boolean(adminPingTasksCache && adminPingTasksCache.expiresAt > Date.now());
+  const tasks = await timed(metrics, cacheHit ? 'memory_cache' : 'db_list_ping', () => listAdminPingTasksCached(database, refresh));
+  if (!refresh) putAdminPingTasksEdgeCache(c, tasks);
+  setServerTiming(c, metrics);
+  c.header('X-CF-VPS-Monitor-Admin-Ping-Cache', refresh ? 'refresh' : (cacheHit ? 'hit' : 'miss'));
+  return c.json(tasks);
+});
+
+adminRoutes.post('/pings', async (c) => {
+  const metrics: TimingMetric[] = [];
+  try {
+    const parsed = await timed(metrics, 'parse_body', () => readAdminJsonObject(c));
+    if (!parsed.ok) return parsed.response;
+    const candidate: Record<string, unknown> = { ...parsed.body, interval: 60, interval_sec: 60 };
+    const database = getDatabase(c.env);
+    const allowedClientIds = candidate.all_clients ? undefined : await timed(metrics, 'db_allowed_clients', () => getAllowedClientIdsForPingTask(database, candidate));
+    const validated = validatePingTaskInput(candidate, allowedClientIds);
+    if (!validated.ok) return c.json({ error: 'Ping 任务校验失败', details: validated.errors }, 400);
+
+    const task = await timed(metrics, 'db_create_ping', () => db.createPingTask(database, validated.task));
+    invalidateAdminPingTasksCache();
+    purgeAdminPingTasksEdgeCache(c);
+    invalidateAdminPublicMetadata(c);
+    invalidateAgentPingTaskCache();
+    invalidateCapacityEstimateCache();
+    runAdminBackground(c, refreshLivePingTasks(c));
+    runAdminBackground(c, db.insertAuditLog(database, c.get('username')!, 'ping_add_api', pingTaskAuditDetail('API 添加 Ping 任务', task)));
+    setServerTiming(c, metrics);
+    return c.json({ success: true, task }, 201);
+  } catch {
+    return c.json({ error: '添加失败' }, 500);
+  }
+});
+
+adminRoutes.patch('/pings/:id', async (c) => {
+  const metrics: TimingMetric[] = [];
+  try {
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Ping 任务 ID 无效' }, 400);
+    const parsed = await timed(metrics, 'parse_body', () => readAdminJsonObject(c));
+    if (!parsed.ok) return parsed.response;
+    const candidate: Record<string, unknown> = { ...parsed.body, id, interval: 60, interval_sec: 60 };
+    const database = getDatabase(c.env);
+    const allowedClientIds = candidate.all_clients ? undefined : await timed(metrics, 'db_allowed_clients', () => getAllowedClientIdsForPingTask(database, candidate));
+    const validated = validatePingTaskInput(candidate, allowedClientIds);
+    if (!validated.ok) return c.json({ error: 'Ping 任务校验失败', details: validated.errors }, 400);
+
+    const task = await timed(metrics, 'db_update_ping', () => db.updatePingTaskAndReturn(database, id, validated.task));
+    if (!task) return c.json({ error: 'Ping 任务不存在' }, 404);
+    invalidateAdminPingTasksCache();
+    purgeAdminPingTasksEdgeCache(c);
+    invalidateAdminPublicMetadata(c);
+    invalidateAgentPingTaskCache();
+    invalidateCapacityEstimateCache();
+    runAdminBackground(c, refreshLivePingTasks(c));
+    runAdminBackground(c, db.insertAuditLog(database, c.get('username')!, 'ping_edit_api', pingTaskAuditDetail(`API 编辑 Ping 任务 ${id}`, task)));
+    setServerTiming(c, metrics);
+    return c.json({ success: true, changed: 1, task });
+  } catch {
+    return c.json({ error: '编辑失败' }, 500);
+  }
+});
+
 // ============ 网站监控 ============
 
 adminRoutes.get('/websites', async (c) => {
@@ -2083,6 +2236,53 @@ adminRoutes.post('/websites/edit', async (c) => {
     return c.json({ success: true, changed: 1, monitor });
   } catch (error) {
     console.error('[admin] website edit failed:', sanitizeSetupDiagnosticDetail(error));
+    return c.json({ error: '编辑失败' }, 500);
+  }
+});
+
+// Canonical machine API aliases for website monitors.
+adminRoutes.post('/websites', async (c) => {
+  try {
+    const parsed = await readAdminJsonObject(c);
+    if (!parsed.ok) return parsed.response;
+    const validated = validateWebsiteMonitorInput(parsed.body);
+    if (!validated.ok) return c.json({ error: '网站监控校验失败', code: validated.error }, 400);
+
+    const database = getDatabase(c.env);
+    const monitor = await db.createWebsiteMonitor(database, validated.value);
+    invalidateWebsiteMonitorPublicState(c, { upsert: [monitor] });
+    runAdminBackground(c, db.insertAuditLog(database, c.get('username')!, 'website_add_api', `API 添加网站监控: ${monitor.name} ${monitor.url}`));
+    return c.json({ success: true, monitor }, 201);
+  } catch (error) {
+    console.error('[admin] website canonical add failed:', sanitizeSetupDiagnosticDetail(error));
+    return c.json({ error: '添加失败' }, 500);
+  }
+});
+
+adminRoutes.patch('/websites/:id', async (c) => {
+  try {
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: '网站监控 ID 无效' }, 400);
+    const parsed = await readAdminJsonObject(c);
+    if (!parsed.ok) return parsed.response;
+
+    const database = getDatabase(c.env);
+    const body = { ...parsed.body, id };
+    const hasFullPayload = WEBSITE_MONITOR_REQUIRED_EDIT_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(body, field));
+    const existing = hasFullPayload ? null : await db.getWebsiteMonitor(database, id);
+    if (!hasFullPayload && !existing) return c.json({ error: '网站监控不存在' }, 404);
+
+    const candidate = hasFullPayload ? body : { ...existing, ...body };
+    const validated = validateWebsiteMonitorInput(candidate);
+    if (!validated.ok) return c.json({ error: '网站监控校验失败', code: validated.error }, 400);
+
+    const monitor = await db.updateWebsiteMonitorAndReturn(database, id, validated.value);
+    if (!monitor) return c.json({ error: '网站监控不存在' }, 404);
+    invalidateWebsiteMonitorPublicState(c, { upsert: [monitor] });
+    runAdminBackground(c, db.insertAuditLog(database, c.get('username')!, 'website_edit_api', `API 编辑网站监控: ${existing?.name || id} -> ${monitor.name}`));
+    return c.json({ success: true, changed: 1, monitor });
+  } catch (error) {
+    console.error('[admin] website canonical edit failed:', sanitizeSetupDiagnosticDetail(error));
     return c.json({ error: '编辑失败' }, 500);
   }
 });

@@ -33,6 +33,12 @@
       },
       "JWT_SECRET": {
         "description": "后台登录会话签名密钥。建议使用至少 32 个字符的随机字符串。"
+      },
+      "ADMIN_API_TOKEN": {
+        "description": "可选机器 API Bearer Token。建议使用 npm run cfvm -- token generate 生成 64 位 hex，并作为 Cloudflare Secret 保存。"
+      },
+      "ADMIN_API_TOKEN_SCOPES": {
+        "description": "可选机器 API 权限。默认 read；Codex 常用 read,write；backup/restore 仅在需要时开启。"
       }
     }
   },

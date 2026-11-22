@@ -15,6 +15,7 @@ import { adminThemeRoutes, publicThemeRoutes } from './routes/theme';
 import { clientRoutes } from './routes/client';
 import { wsRoutes } from './routes/websocket';
 import { setupRoutes } from './routes/setup';
+import { machineApiRoutes } from './routes/machine-api';
 import * as db from './db/queries';
 import { DatabaseConfigurationError, getDatabase, withDatabase } from './db/provider';
 import { validateAdminSession } from './auth/admin-session';
@@ -344,18 +345,23 @@ app.use('/api/v1/*', async (c, next): Promise<Response | undefined> => {
   if (!auth.ok) {
     if (auth.reason === 'missing' || auth.reason === 'invalid') {
       c.header('WWW-Authenticate', 'Bearer realm="cf-vps-monitor-api"');
-      return c.json({ error: 'Unauthorized' }, 401);
+      return c.json({ code: 'API_UNAUTHORIZED', error: 'Unauthorized' }, 401);
     }
     if (auth.reason === 'insufficient_scope') {
       return c.json({
+        code: 'API_SCOPE_REQUIRED',
         error: 'Insufficient API token scope',
         required_scope: auth.requiredScope,
       }, 403);
     }
     if (auth.reason === 'forbidden') {
-      return c.json({ error: 'This operation is not available to machine API tokens' }, 403);
+      return c.json({
+        code: 'API_OPERATION_FORBIDDEN',
+        error: 'This operation is not available to machine API tokens',
+      }, 403);
     }
     return c.json({
+      code: auth.reason === 'not_configured' ? 'API_DISABLED' : 'API_MISCONFIGURED',
       error: auth.reason === 'not_configured'
         ? 'Machine API is disabled'
         : 'Machine API token is misconfigured',
@@ -365,11 +371,14 @@ app.use('/api/v1/*', async (c, next): Promise<Response | undefined> => {
   c.set('userId', 'api-token');
   c.set('username', auth.principal);
   c.header('X-CF-VPS-Monitor-Auth', 'api-token');
+  c.header('X-CF-VPS-Monitor-API-Version', 'v1');
   c.header('X-CF-VPS-Monitor-API-Scopes', auth.scopes.join(','));
+  c.header('Link', '</api/v1/openapi.json>; rel="service-desc"');
   await next();
   return undefined;
 });
 
+app.route('/api/v1', machineApiRoutes);
 app.route('/api/v1/themes', adminThemeRoutes);
 app.route('/api/v1', adminRoutes);
 
@@ -377,6 +386,15 @@ app.post('/api/v1/cron/run', async (c) => {
   await runScheduled(c.env);
   return c.json({ success: true });
 });
+
+app.all('/api/v1/*', (c) => c.json({
+  code: 'API_ROUTE_NOT_FOUND',
+  error: 'Machine API route not found',
+  method: c.req.method,
+  path: c.req.path,
+  discovery: '/api/v1/capabilities',
+  openapi: '/api/v1/openapi.json',
+}, 404));
 
 // 管理员 API，JWT 认证
 app.use('/api/admin/*', async (c, next): Promise<Response | undefined> => {
