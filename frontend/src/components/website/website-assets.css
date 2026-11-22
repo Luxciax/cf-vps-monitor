@@ -13,13 +13,13 @@
   isolation: isolate;
   min-height: calc(100dvh - 112px);
   padding: clamp(12px, 2.2vw, 30px);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .website-dashboard-background,
 .website-dashboard-background-overlay {
-  position: absolute;
-  inset: 0;
+  position: fixed;
+  inset: 64px 0 0;
   pointer-events: none;
 }
 
@@ -709,6 +709,11 @@
   .website-asset-dashboard {
     min-height: calc(100dvh - 146px);
     padding: 15px 10px 24px;
+  }
+
+  .website-dashboard-background,
+  .website-dashboard-background-overlay {
+    inset: 104px 0 0;
   }
 
   .website-dashboard-background {
