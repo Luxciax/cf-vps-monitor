@@ -48,6 +48,24 @@ test('every non-account admin route is represented in the machine API manifest',
   assert.deepEqual(missing, [], 'routes missing from machine API manifest: ' + missing.join(', '));
 });
 
+test('every canonical machine API endpoint is actually registered', () => {
+  const adminSource = readFileSync(new URL('./admin.ts', import.meta.url), 'utf8');
+  const themeSource = readFileSync(new URL('./theme.ts', import.meta.url), 'utf8');
+  const machineSource = readFileSync(new URL('./machine-api.ts', import.meta.url), 'utf8');
+  const registered = new Set([
+    ...routeDeclarations(adminSource, 'adminRoutes'),
+    ...routeDeclarations(themeSource, 'adminThemeRoutes', '/themes'),
+    ...routeDeclarations(machineSource, 'machineApiRoutes'),
+  ].map(item => routeKey(item.method, item.path)));
+
+  const missing = MACHINE_API_ENDPOINTS
+    .filter(item => item.canonical)
+    .map(item => routeKey(item.method, item.path))
+    .filter(key => !registered.has(key));
+
+  assert.deepEqual(missing, [], 'canonical endpoints missing from Hono routes: ' + missing.join(', '));
+});
+
 test('human account and MFA endpoints are intentionally absent from machine API manifest', () => {
   for (const endpoint of MACHINE_API_ENDPOINTS) {
     assert.equal(endpoint.path === '/account' || endpoint.path.startsWith('/account/'), false);

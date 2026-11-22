@@ -31,22 +31,42 @@ type HeartbeatTooltip = {
 export default function WebsiteHeartbeatBar({
   checks,
   max = 60,
+  fallbackStatus = 'pending',
 }: {
   checks: Array<WebsiteHeartbeatPoint | null>;
   max?: number;
+  fallbackStatus?: 'pending' | 'up' | 'down' | 'paused';
 }) {
   const visible = checks.slice(0, max).reverse();
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<HeartbeatTooltip | null>(null);
   const blanks = Math.max(0, max - visible.length);
+  const hasRealCheck = visible.some((check) => Boolean(check));
+  const inferHealthyGap = fallbackStatus === 'up' && hasRealCheck;
+  const inferredGap = (key: string) => inferHealthyGap
+    ? ({
+        key,
+        state: 'up',
+        title: '历史数据缺失 · 当前状态在线（推定）',
+        interactive: true,
+        inferred: true,
+      })
+    : ({
+        key,
+        state: 'empty',
+        title: '暂无数据',
+        interactive: false,
+        inferred: false,
+      });
   const bars = [
-    ...Array.from({ length: blanks }, (_, index) => ({ key: `blank-${index}`, state: 'empty', title: '暂无数据', interactive: false })),
+    ...Array.from({ length: blanks }, (_, index) => inferredGap(`blank-${index}`)),
     ...visible.map((check, index) => check ? ({
       key: check.checked_at,
       state: check.ok ? 'up' : 'down',
       title: heartbeatResultText(check),
       interactive: true,
-    }) : ({ key: `slot-empty-${index}`, state: 'empty', title: '暂无数据', interactive: false })),
+      inferred: false,
+    }) : inferredGap(`slot-empty-${index}`)),
   ];
 
   const latest = [...visible].reverse().find((check): check is WebsiteHeartbeatPoint => Boolean(check));
@@ -100,7 +120,7 @@ export default function WebsiteHeartbeatBar({
       {bars.map((bar) => (
         <span
           key={bar.key}
-          className={`website-heartbeat-segment is-${bar.state}${bar.interactive ? ' is-interactive' : ''}`}
+          className={`website-heartbeat-segment is-${bar.state}${bar.inferred ? ' is-inferred' : ''}${bar.interactive ? ' is-interactive' : ''}`}
           data-tooltip={bar.interactive ? bar.title : undefined}
           aria-label={bar.interactive ? bar.title : undefined}
           tabIndex={bar.interactive ? 0 : undefined}

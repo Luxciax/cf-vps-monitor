@@ -46,7 +46,7 @@ export default function WebsiteMonitorDetails({ monitor }: { monitor: WebsiteMon
       </Flex>
 
       <Box className="kuma-monitor-heartbeat-panel">
-        <WebsiteHeartbeatBar checks={workerChecks} max={60} />
+        <WebsiteHeartbeatBar checks={workerChecks} max={60} fallbackStatus={monitor.status} />
       </Box>
 
       <div className="kuma-monitor-stats">

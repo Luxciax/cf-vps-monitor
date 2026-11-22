@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { deleteSupabaseWebsiteMonitor } from './client.ts';
+
+const env = {
+  SUPABASE_URL: 'https://synthetic.supabase.co',
+  SUPABASE_SECRET_KEY: 'sb_secret_synthetic',
+};
+
+test('website delete falls back to legacy RPC when batch delete RPC is missing', async () => {
+  const calls = [];
+  const fetcher = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith('/rpc/cfm_delete_website_monitor_batch')) {
+      return new Response(JSON.stringify({
+        code: 'PGRST202',
+        message: 'Could not find the function public.cfm_delete_website_monitor_batch(input_id)',
+      }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
+    assert.match(String(url), /\/rpc\/cfm_delete_website_monitor$/);
+    assert.deepEqual(JSON.parse(String(init.body)), { input_id: 16 });
+    return new Response(null, { status: 204 });
+  };
+
+  await deleteSupabaseWebsiteMonitor(env, 16, fetcher);
+  assert.equal(calls.length, 2);
+});
+
+test('website delete does not hide non-missing batch RPC failures', async () => {
+  let calls = 0;
+  const fetcher = async () => {
+    calls += 1;
+    return new Response('database unavailable', { status: 503 });
+  };
+
+  await assert.rejects(
+    () => deleteSupabaseWebsiteMonitor(env, 16, fetcher),
+    /503/,
+  );
+  assert.equal(calls, 1);
+});

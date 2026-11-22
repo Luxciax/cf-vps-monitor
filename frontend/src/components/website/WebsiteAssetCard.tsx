@@ -145,7 +145,7 @@ export default function WebsiteAssetCard({
       )}
 
       <div className="website-asset-heartbeat">
-        <WebsiteHeartbeatBar checks={asset.heartbeat} max={asset.heartbeatSegments} />
+        <WebsiteHeartbeatBar checks={asset.heartbeat} max={asset.heartbeatSegments} fallbackStatus={monitor.status} />
         <div className="website-asset-heartbeat-caption">
           <span>{periodHours}h</span>
           <span>{protocolLabel(monitor)} · {lastCheckedText(monitor.last_checked_at)}</span>
