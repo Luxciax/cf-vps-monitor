@@ -170,7 +170,11 @@ async function request(path, method = 'GET', body, { print = true } = {}) {
   if (!allowed.has(normalizedMethod)) throw new Error(`unsupported HTTP method: ${normalizedMethod}`);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const configuredTimeout = Number(process.env.CFVM_TIMEOUT_MS || '');
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 1_000 && configuredTimeout <= 300_000
+    ? Math.trunc(configuredTimeout)
+    : normalizedMethod === 'DELETE' ? 120_000 : 30_000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const headers = {
       Authorization: `Bearer ${token()}`,
@@ -292,7 +296,22 @@ async function main() {
     }
     if (action === 'remove') {
       const id = positiveInteger(rest[0], 'website id');
-      return request(`/websites/${id}`, 'DELETE');
+      let deletedChecks = 0;
+      for (let attempt = 1; attempt <= 64; attempt += 1) {
+        const result = await request(`/websites/${id}`, 'DELETE', undefined, { print: false });
+        deletedChecks += Number(result?.deleted_checks || 0);
+        if (!result?.deletion_pending) {
+          const output = {
+            ...(result && typeof result === 'object' ? result : { success: true, id }),
+            deleted_checks_total: deletedChecks,
+            delete_attempts: attempt,
+          };
+          console.log(JSON.stringify(output, null, 2));
+          return output;
+        }
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+      throw new Error('website deletion did not finish after 64 bounded attempts');
     }
     if (action === 'check') {
       const id = positiveInteger(rest[0], 'website id');

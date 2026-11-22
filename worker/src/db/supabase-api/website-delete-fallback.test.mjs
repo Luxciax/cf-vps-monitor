@@ -7,26 +7,20 @@ const env = {
   SUPABASE_SECRET_KEY: 'sb_secret_synthetic',
 };
 
-test('website delete falls back to legacy RPC when batch delete RPC is missing', async () => {
-  const calls = [];
-  const fetcher = async (url, init = {}) => {
-    calls.push({ url: String(url), init });
-    if (String(url).endsWith('/rpc/cfm_delete_website_monitor_batch')) {
-      return new Response(JSON.stringify({
-        code: 'PGRST202',
-        message: 'Could not find the function public.cfm_delete_website_monitor_batch(input_id)',
-      }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-    }
-    assert.match(String(url), /\/rpc\/cfm_delete_website_monitor$/);
-    assert.deepEqual(JSON.parse(String(init.body)), { input_id: 16 });
-    return new Response(null, { status: 204 });
+test('new batch-delete RPC stops after a bounded number of steps and reports progress', async () => {
+  let calls = 0;
+  const fetcher = async (url) => {
+    calls += 1;
+    assert.match(String(url), /\/rpc\/cfm_delete_website_monitor_batch$/);
+    return Response.json({ deleted: false, deleted_checks: 1000 });
   };
 
-  await deleteSupabaseWebsiteMonitor(env, 16, fetcher);
-  assert.equal(calls.length, 2);
+  const result = await deleteSupabaseWebsiteMonitor(env, 16, fetcher);
+  assert.deepEqual(result, { deleted: false, deleted_checks: 12000 });
+  assert.equal(calls, 12);
 });
 
-test('website delete falls back to bounded table batches when legacy RPC times out', async () => {
+test('legacy schema tombstones then deletes history in bounded table batches', async () => {
   const calls = [];
   let page = 0;
   const fetcher = async (url, init = {}) => {
@@ -37,11 +31,12 @@ test('website delete falls back to bounded table batches when legacy RPC times o
         message: 'Could not find the function public.cfm_delete_website_monitor_batch(input_id)',
       }), { status: 404, headers: { 'Content-Type': 'application/json' } });
     }
-    if (String(url).endsWith('/rpc/cfm_delete_website_monitor')) {
-      return new Response(JSON.stringify({
-        code: '57014',
-        message: 'canceling statement due to statement timeout',
-      }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    if (String(url).includes('/rest/v1/website_monitors?id=eq.16') && init.method === 'PATCH') {
+      const body = JSON.parse(String(init.body));
+      assert.equal(body.enabled, false);
+      assert.equal(body.hidden, true);
+      assert.equal(body.status, 'paused');
+      return new Response(null, { status: 204 });
     }
     if (String(url).includes('/rest/v1/website_checks?select=id&monitor_id=eq.16')) {
       assert.equal(init.method, 'GET');
@@ -52,15 +47,42 @@ test('website delete falls back to bounded table batches when legacy RPC times o
       assert.equal(init.method, 'DELETE');
       return new Response(null, { status: 204 });
     }
-    if (String(url).includes('/rest/v1/website_monitors?id=eq.16')) {
-      assert.equal(init.method, 'DELETE');
+    if (String(url).includes('/rest/v1/website_monitors?id=eq.16') && init.method === 'DELETE') {
       return new Response(null, { status: 204 });
     }
     throw new Error('unexpected URL ' + url);
   };
 
-  await deleteSupabaseWebsiteMonitor(env, 16, fetcher);
+  const result = await deleteSupabaseWebsiteMonitor(env, 16, fetcher);
+  assert.deepEqual(result, { deleted: true, deleted_checks: 2 });
   assert.equal(calls.length, 6);
+});
+
+test('legacy schema returns resumable progress before hitting subrequest limits', async () => {
+  let listCalls = 0;
+  const fetcher = async (url, init = {}) => {
+    if (String(url).endsWith('/rpc/cfm_delete_website_monitor_batch')) {
+      return new Response(JSON.stringify({
+        code: 'PGRST202',
+        message: 'Could not find the function public.cfm_delete_website_monitor_batch(input_id)',
+      }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (String(url).includes('/rest/v1/website_monitors?id=eq.16') && init.method === 'PATCH') {
+      return new Response(null, { status: 204 });
+    }
+    if (String(url).includes('/rest/v1/website_checks?select=id&monitor_id=eq.16')) {
+      listCalls += 1;
+      return Response.json([{ id: listCalls }]);
+    }
+    if (String(url).includes('/rest/v1/website_checks?id=in.(')) {
+      return new Response(null, { status: 204 });
+    }
+    throw new Error('unexpected URL ' + url);
+  };
+
+  const result = await deleteSupabaseWebsiteMonitor(env, 16, fetcher);
+  assert.deepEqual(result, { deleted: false, deleted_checks: 12 });
+  assert.equal(listCalls, 12);
 });
 
 test('website delete does not hide non-missing batch RPC failures', async () => {
