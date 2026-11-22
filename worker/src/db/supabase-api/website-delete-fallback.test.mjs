@@ -26,6 +26,37 @@ test('website delete falls back to legacy RPC when batch delete RPC is missing',
   assert.equal(calls.length, 2);
 });
 
+test('website delete falls back to direct table deletion when legacy RPC times out', async () => {
+  const calls = [];
+  const fetcher = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith('/rpc/cfm_delete_website_monitor_batch')) {
+      return new Response(JSON.stringify({
+        code: 'PGRST202',
+        message: 'Could not find the function public.cfm_delete_website_monitor_batch(input_id)',
+      }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (String(url).endsWith('/rpc/cfm_delete_website_monitor')) {
+      return new Response(JSON.stringify({
+        code: '57014',
+        message: 'canceling statement due to statement timeout',
+      }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (String(url).includes('/rest/v1/website_checks?monitor_id=eq.16')) {
+      assert.equal(init.method, 'DELETE');
+      return new Response(null, { status: 204 });
+    }
+    if (String(url).includes('/rest/v1/website_monitors?id=eq.16')) {
+      assert.equal(init.method, 'DELETE');
+      return new Response(null, { status: 204 });
+    }
+    throw new Error('unexpected URL ' + url);
+  };
+
+  await deleteSupabaseWebsiteMonitor(env, 16, fetcher);
+  assert.equal(calls.length, 4);
+});
+
 test('website delete does not hide non-missing batch RPC failures', async () => {
   let calls = 0;
   const fetcher = async () => {

@@ -462,39 +462,39 @@ export function deleteSupabaseOldAuditLogs(
   });
 }
 
-export function claimSupabaseNotificationDelivery(
-  env: SupabaseApiEnv, key: string, eventId: string, now: string, repeatMs: number,
+export async function claimSupabaseNotificationDelivery(
+  env: SupabaseApiEnv,
+  key: string,
+  eventId: string,
+  now: string,
+  repeatMs: number,
+  fetcher: typeof fetch = fetch,
 ): Promise<NotificationDeliveryClaim> {
-  return callSupabaseRpc(env, 'cfm_claim_notification_delivery', {
-    input_key: key, input_event_id: eventId, input_now: now, input_repeat_ms: repeatMs,
-  });
+  try {
+    return await callSupabaseRpc<NotificationDeliveryClaim>(
+      env,
+      'cfm_claim_notification_delivery',
+      {
+        input_key: key,
+        input_event_id: eventId,
+        input_now: now,
+        input_repeat_ms: repeatMs,
+      },
+      fetcher,
+    );
+  } catch (error) {
+    if (!isMissingRpc(error)) throw error;
+    // Legacy schemas have no persistent delivery lease. Skip the notification
+    // attempt rather than aborting the scheduled website-check phase.
+    return { claimed: false, delivered: false, token: null };
+  }
 }
 
-export function completeSupabaseNotificationDelivery(
-  env: SupabaseApiEnv, key: string, eventId: string, token: string, success: boolean, now: string, repeatMs: number,
-): Promise<boolean> {
-  return callSupabaseRpc(env, 'cfm_complete_notification_delivery', {
-    input_key: key, input_event_id: eventId, input_token: token,
-    input_success: success, input_now: now, input_repeat_ms: repeatMs,
-  });
-}
-
-export function getSupabaseOfflineNotification(env: SupabaseApiEnv, client: string): Promise<OfflineNotification | null> {
-  return callSupabaseRpc<OfflineNotification | null>(env, 'cfm_offline_notification', { input_client: client });
-}
-
-export function listSupabaseOfflineNotifications(env: SupabaseApiEnv): Promise<OfflineNotification[]> {
-  return callSupabaseRpc<OfflineNotification[]>(env, 'cfm_offline_notifications');
-}
-
-export function setSupabaseOfflineNotifications(env: SupabaseApiEnv, items: OfflineNotificationUpdate[]): Promise<number> {
-  return callSupabaseRpc<number>(env, 'cfm_set_offline_notifications', { input_items: items });
-}
-
-export function markSupabaseOfflineNotificationSent(env: SupabaseApiEnv, client: string, time: string | null, token: string): Promise<boolean> {
-  return callSupabaseRpc<boolean>(env, 'cfm_mark_offline_notification_sent', {
-    input_client: client,
-    input_time: time,
-    input_token: token,
-  });
-}
+export async function completeSupabaseNotificationDelivery(
+  env: SupabaseApiEnv,
+  key: string,
+  eventId: string,
+  token: string,
+  success: boolean,
+  now: string,
+  repeatMs: number,
