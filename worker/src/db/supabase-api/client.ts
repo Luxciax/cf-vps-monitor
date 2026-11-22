@@ -83,6 +83,12 @@ function isMissingRpc(error: unknown): error is SupabaseApiError {
     && /PGRST202|Could not find the function/i.test(error.message);
 }
 
+function isStatementTimeout(error: unknown): error is SupabaseApiError {
+  return error instanceof SupabaseApiError
+    && error.status >= 500
+    && /57014|statement timeout|canceling statement/i.test(error.message);
+}
+
 function sanitizeSupabaseDetail(detail: string, key: string): string {
   return redactDatabaseSecrets(detail).replaceAll(key, '[REDACTED]').slice(0, 400);
 }
@@ -593,11 +599,46 @@ export function deleteSupabaseLoadNotification(env: SupabaseApiEnv, id: number):
   return callSupabaseRpc<void>(env, 'cfm_delete_load_notification', { input_id: id });
 }
 
-export function listSupabaseDueWebsiteMonitors(env: SupabaseApiEnv, now: string, limit: number): Promise<WebsiteMonitor[]> {
-  return callSupabaseRpc<WebsiteMonitor[]>(env, 'cfm_due_website_monitors', {
-    input_now: now,
-    input_limit: limit,
-  }).then(normalizeWebsiteMonitorList);
+export async function listSupabaseDueWebsiteMonitors(
+  env: SupabaseApiEnv,
+  now: string,
+  limit: number,
+  fetcher: typeof fetch = fetch,
+): Promise<WebsiteMonitor[]> {
+  try {
+    return normalizeWebsiteMonitorList(await callSupabaseRpc<WebsiteMonitor[]>(
+      env,
+      'cfm_due_website_monitors',
+      {
+        input_now: now,
+        input_limit: limit,
+      },
+      fetcher,
+    ));
+  } catch (error) {
+    if (!isStatementTimeout(error)) throw error;
+
+    const rows = await callSupabaseTable<WebsiteMonitor[]>(
+      env,
+      'website_monitors?select=*&enabled=eq.true&order=last_checked_at.asc.nullsfirst,sort_order.asc,id.asc&limit=200',
+      { method: 'GET' },
+      fetcher,
+    );
+    const nowMs = Date.parse(now);
+    if (!Number.isFinite(nowMs)) return [];
+
+    const boundedLimit = Math.min(Math.max(Math.trunc(Number(limit) || 50), 1), 200);
+    return normalizeWebsiteMonitorList(rows)
+      .filter((monitor) => {
+        if (!monitor.enabled) return false;
+        if (!monitor.last_checked_at) return true;
+        const lastCheckedMs = Date.parse(monitor.last_checked_at);
+        if (!Number.isFinite(lastCheckedMs)) return true;
+        const intervalMs = Math.max(Number(monitor.interval_sec || 60) - 30, 1) * 1000;
+        return lastCheckedMs <= nowMs - intervalMs;
+      })
+      .slice(0, boundedLimit);
+  }
 }
 
 export function recordSupabaseWebsiteCheck(env: SupabaseApiEnv, check: WebsiteCheckInput): Promise<WebsiteMonitor | null> {
