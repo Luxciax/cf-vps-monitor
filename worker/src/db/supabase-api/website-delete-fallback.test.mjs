@@ -38,8 +38,11 @@ test('legacy schema tombstones then deletes history in bounded table batches', a
       assert.equal(body.status, 'paused');
       return new Response(null, { status: 204 });
     }
-    if (String(url).includes('/rest/v1/website_checks?select=id&monitor_id=eq.16')) {
-      assert.equal(init.method, 'GET');
+    if (String(url).endsWith('/rpc/cfm_website_checks')) {
+      assert.deepEqual(JSON.parse(String(init.body)), {
+        input_monitor_id: 16,
+        input_limit: 250,
+      });
       page += 1;
       return Response.json(page === 1 ? [{ id: 101 }, { id: 102 }] : []);
     }
@@ -70,7 +73,11 @@ test('legacy schema returns resumable progress before hitting subrequest limits'
     if (String(url).includes('/rest/v1/website_monitors?id=eq.16') && init.method === 'PATCH') {
       return new Response(null, { status: 204 });
     }
-    if (String(url).includes('/rest/v1/website_checks?select=id&monitor_id=eq.16')) {
+    if (String(url).endsWith('/rpc/cfm_website_checks')) {
+      assert.deepEqual(JSON.parse(String(init.body)), {
+        input_monitor_id: 16,
+        input_limit: 250,
+      });
       listCalls += 1;
       return Response.json([{ id: listCalls }]);
     }
