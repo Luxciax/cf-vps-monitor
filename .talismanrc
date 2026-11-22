@@ -85,7 +85,7 @@ fileignoreconfig:
 - filename: frontend/src/utils/displayTheme.registry.test.mjs
   checksum: bb5195817a59927bc55d5dee4548a7bbfc57bd90dd7010487ec9fa14e27628c8
 - filename: worker/src/db/queries.ts
-  checksum: 2a2da9525f5cf7bc634f40bb9c5e82dcb873b48780584a217a09f1fbef861bba
+  checksum: f0b183d576b4eceb9b5653f6c89c21f293a01b7feaedd3c7525f982d17dd85de
 - filename: worker/src/db/supabase-api/audit-throttle.test.mjs
   checksum: c93919eee277eabb07fb37c20ff0d44da08999f12134226f7aa90eed165b5985
 - filename: worker/src/routes/public.audit-overlay.test.mjs
@@ -125,7 +125,7 @@ fileignoreconfig:
 - filename: worker/src/utils/health-staleness.test.mjs
   checksum: be4dc41b50633f3c0c8b8a970211e942d45d23177ff5c302bd9fc0c3519cc2eb
 - filename: worker/src/db/supabase-api/client.ts
-  checksum: 0f39f5f9c05a0eefa3231d9e29985fa624d48d61a2f501f35d8157958e1f4589
+  checksum: 6024699a06f059ca6d1d2dcafc2e0d1c4231cdee53f786d34c0b5602303fa7f2
 - filename: worker/src/routes/client.report-receipt.test.mjs
   checksum: 945cacf1e3e66d1a8bcf41a38b7ffd20800d6738893a0098ea8f0633d8d7cb30
 - filename: worker/src/routes/public.ts
@@ -187,13 +187,13 @@ fileignoreconfig:
 - filename: worker/src/auth/jwt.audit-isolation.test.mjs
   checksum: a27ef24c7c8842c35ad64972cce04167dd5767ee6289b30d86f596fd300b1f9f
 - filename: worker/worker-configuration.d.ts
-  checksum: 6a0cc3c5f7b6c0184dfc445a447fe35824cafd1def0976d0d16330371b5fc4b7
+  checksum: 2aa0e2aa1f0385afd26c36b5469621d39a461faad85b8e73e0b592c05e5dfde9
 - filename: frontend/src/pages/Instance.tsx
   checksum: 706c240294d8e06e83b24b8ac65440fae21e2da65fabd4e44f8285a3df57dd0e
 - filename: worker/src/db/supabase-api/website-check-order.reaudit.test.mjs
   checksum: f017632f99ce181e513b353a0d4e211347921c397f82ade8dcf752da7a05f6aa
 - filename: worker/src/routes/admin.ts
-  checksum: 47692c73c473300b255a1a1fae8cd8c12943ec938241905f3fed45131b6b1f9d
+  checksum: e55d57e390f2e37d8b91433bac036983749cda7e0ad55e75ff6f7e8f74ba4157
 - filename: frontend/browser/helpers/harness.mjs
   checksum: c4eda7ab03c5c647ba486dd75e9715fac75ad9cdd4a710d840f4574f9e9e21f4
 - filename: worker/src/auth/viewer-token.test.mjs
