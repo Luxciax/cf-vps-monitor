@@ -18,6 +18,7 @@ import { getNodeDisplayRecord, getNodeLastReportTime, getNodeStatus } from '../u
 import WebsiteMonitorList, { WebsiteMonitorSummary } from '../components/WebsiteMonitorList';
 import { subscribeWebsiteMonitorsUpdated, type WebsiteMonitorsUpdateDetail } from '../utils/websiteMonitorEvents';
 import { notifyPublicDataReady, subscribePublicDataUpdated } from '../utils/publicDataEvents';
+import { deriveWebsiteHealthStatus, latestWebsiteHealthCheck } from '../utils/websiteHealth';
 import type { PublicDataUpdateDetail } from '../utils/publicDataEvents';
 
 const NodeCard = React.lazy(() => import('../components/NodeCard'));
@@ -70,6 +71,11 @@ function normalizeWebsiteSummary(input: unknown, options: { includeHidden?: bool
   const id = Number(value.id);
   const hidden = readWebsiteHidden(value.hidden);
   if (!Number.isInteger(id) || id <= 0 || (!options.includeHidden && hidden)) return null;
+  const checks = Array.isArray(value.checks)
+    ? value.checks.filter((check): check is WebsiteMonitorSummary['checks'][number] => Boolean(check && typeof check === 'object'))
+    : [];
+  const latestCheck = latestWebsiteHealthCheck(checks);
+  const status = deriveWebsiteHealthStatus(value.status, checks);
   return {
     id,
     name: String(value.name || ''),
@@ -77,12 +83,12 @@ function normalizeWebsiteSummary(input: unknown, options: { includeHidden?: bool
     url: (!options.includeHidden && readWebsiteHidden(value.hide_url)) || value.url == null ? null : String(value.url),
     method: value.method === 'TCP' || value.method === 'HEAD' || value.method === 'GET' ? value.method : undefined,
     interval_sec: typeof value.interval_sec === 'number' ? value.interval_sec : 120,
-    status: value.status === 'up' || value.status === 'down' || value.status === 'paused' ? value.status : 'pending',
-    last_checked_at: typeof value.last_checked_at === 'string' ? value.last_checked_at : null,
-    last_status_code: typeof value.last_status_code === 'number' ? value.last_status_code : null,
-    last_raw_status_code: typeof value.last_raw_status_code === 'number' ? value.last_raw_status_code : null,
-    last_latency_ms: typeof value.last_latency_ms === 'number' ? value.last_latency_ms : null,
-    last_effective_reason: typeof value.last_effective_reason === 'string' ? value.last_effective_reason : null,
+    status,
+    last_checked_at: typeof value.last_checked_at === 'string' ? value.last_checked_at : (typeof latestCheck?.checked_at === 'string' ? latestCheck.checked_at : null),
+    last_status_code: typeof value.last_status_code === 'number' ? value.last_status_code : (typeof latestCheck?.status_code === 'number' ? latestCheck.status_code : null),
+    last_raw_status_code: typeof value.last_raw_status_code === 'number' ? value.last_raw_status_code : (typeof latestCheck?.raw_status_code === 'number' ? latestCheck.raw_status_code : null),
+    last_latency_ms: typeof value.last_latency_ms === 'number' ? value.last_latency_ms : (typeof latestCheck?.latency_ms === 'number' ? latestCheck.latency_ms : null),
+    last_effective_reason: typeof value.last_effective_reason === 'string' ? value.last_effective_reason : (typeof latestCheck?.effective_reason === 'string' ? latestCheck.effective_reason : null),
     hidden,
     description: typeof value.description === 'string' ? value.description : '',
     category: typeof value.category === 'string' ? value.category : '',
@@ -92,7 +98,7 @@ function normalizeWebsiteSummary(input: unknown, options: { includeHidden?: bool
     domain: typeof value.domain === 'string' ? value.domain : '',
     deployment: typeof value.deployment === 'string' ? value.deployment : '',
     repository_url: typeof value.repository_url === 'string' ? value.repository_url : '',
-    checks: Array.isArray(value.checks) ? value.checks : [],
+    checks,
   };
 }
 

@@ -97,7 +97,7 @@ function normalizeDashboardBackground(config: Record<string, unknown>): Dashboar
 }
 
 function uptimePercent(checks: WebsiteHeartbeatPoint[]) {
-  if (checks.length === 0) return '0%';
+  if (checks.length === 0) return '—';
   const ok = checks.filter((check) => check.ok).length;
   const percent = (ok / checks.length) * 100;
   return `${percent >= 99.995 ? '100' : percent.toFixed(2)}%`;
@@ -241,7 +241,7 @@ export default function WebsiteMonitorList({
           />
           <div
             className="website-dashboard-background-overlay"
-            style={{ background: `rgba(5, 9, 17, ${backgroundSettings.overlay})` }}
+            style={{ backgroundColor: `rgba(5, 9, 17, ${backgroundSettings.overlay})` }}
             aria-hidden="true"
           />
         </>

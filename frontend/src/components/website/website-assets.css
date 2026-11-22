@@ -13,11 +13,12 @@
   isolation: isolate;
   min-height: calc(100dvh - 112px);
   padding: clamp(12px, 2.2vw, 30px);
+  overflow: hidden;
 }
 
 .website-dashboard-background,
 .website-dashboard-background-overlay {
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
 }
@@ -462,6 +463,10 @@
   background: #fb7185;
   box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.09);
 }
+
+.website-asset-status.is-up { color: #6ee7b7; }
+.website-asset-status.is-down { color: #fda4af; }
+.website-asset-status.is-pending { color: #fcd34d; }
 
 .website-asset-status.is-pending .website-asset-status-dot { background: #fbbf24; }
 
