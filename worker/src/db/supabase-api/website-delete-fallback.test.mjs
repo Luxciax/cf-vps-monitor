@@ -16,8 +16,8 @@ test('new batch-delete RPC stops after a bounded number of steps and reports pro
   };
 
   const result = await deleteSupabaseWebsiteMonitor(env, 16, fetcher);
-  assert.deepEqual(result, { deleted: false, deleted_checks: 12000 });
-  assert.equal(calls, 12);
+  assert.deepEqual(result, { deleted: false, deleted_checks: 4000 });
+  assert.equal(calls, 4);
 });
 
 test('legacy schema tombstones then deletes history in bounded table batches', async () => {
@@ -81,8 +81,8 @@ test('legacy schema returns resumable progress before hitting subrequest limits'
   };
 
   const result = await deleteSupabaseWebsiteMonitor(env, 16, fetcher);
-  assert.deepEqual(result, { deleted: false, deleted_checks: 12 });
-  assert.equal(listCalls, 12);
+  assert.deepEqual(result, { deleted: false, deleted_checks: 4 });
+  assert.equal(listCalls, 4);
 });
 
 test('website delete does not hide non-missing batch RPC failures', async () => {
