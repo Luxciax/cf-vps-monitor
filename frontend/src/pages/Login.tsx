@@ -13,6 +13,7 @@ import { formatAppVersion } from '../utils/version';
 import { normalizeMfaCode, type MfaMethod } from '../utils/mfa';
 
 type RecoveryStatus = {
+  enabled: boolean;
   admin_present: boolean;
   recoverable: boolean;
 };
@@ -85,7 +86,7 @@ export default function Login() {
       .then((data: RecoveryStatus | null) => {
         if (!data) return;
         setRecoveryStatus(data);
-        setRecoveryMode(!data.admin_present);
+        setRecoveryMode(data.enabled && !data.admin_present);
       })
       .catch(() => {});
   }, []);
@@ -148,7 +149,7 @@ export default function Login() {
   const handleRecoverySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!recoveryKey || !recoveryUsername || !recoveryPassword) {
-      toast.error('请填写 Supabase Secret key、用户名和新密码');
+      toast.error('请填写独立管理员恢复凭据、用户名和新密码');
       return;
     }
 
@@ -157,7 +158,7 @@ export default function Login() {
       const payload: Record<string, string> = {
         username: recoveryUsername,
         password: recoveryPassword,
-        supabase_secret_key: recoveryKey,
+        recovery_token: recoveryKey,
       };
       const response = await fetch('/api/admin/recovery', {
         method: 'POST',
@@ -174,7 +175,7 @@ export default function Login() {
       setPassword('');
       setRecoveryPassword('');
       setRecoveryKey('');
-      setRecoveryStatus({ admin_present: true, recoverable: true });
+      setRecoveryStatus({ enabled: true, admin_present: true, recoverable: true });
       setRecoveryMode(false);
     } catch {
       toast.error('请求失败，请稍后重试');
@@ -323,15 +324,16 @@ export default function Login() {
         {recoveryMode && (
           <form onSubmit={handleRecoverySubmit}>
             <Flex direction="column" gap="4">
+              <Text size="2" color="gray">{recoveryStatus?.enabled ? "使用部署时单独设置的管理员恢复凭据。恢复后所有现有登录会话失效。" : "当前未启用管理员恢复。请在部署配置中设置独立恢复凭据并明确启用恢复功能，然后刷新此页。"}</Text>
               <label htmlFor="recovery-secret-key">
                 <Text size="2" weight="bold" style={{ marginBottom: 6, display: 'inline-block' }}>
-                  Supabase Secret key
+                  独立管理员恢复凭据
                 </Text>
                 <TextField.Root
                   id="recovery-secret-key"
                   size="3"
                   type="password"
-                  placeholder="请输入 Supabase Secret key"
+                  placeholder="请输入 独立管理员恢复凭据"
                   value={recoveryKey}
                   onChange={(e) => setRecoveryKey(e.target.value)}
                   autoComplete="off"
@@ -390,7 +392,7 @@ export default function Login() {
               <Button
                 type="submit"
                 size="3"
-                disabled={recoveryLoading || recoveryStatus?.recoverable === false}
+                disabled={recoveryLoading || !recoveryStatus?.enabled || !recoveryStatus?.recoverable}
                 style={{
                   marginTop: 8,
                   fontWeight: 600,

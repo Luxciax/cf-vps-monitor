@@ -13,7 +13,7 @@ import {
   TextArea,
   TextField,
 } from '@radix-ui/themes';
-import { Check, Eye, Palette, Plus, RotateCcw, Settings, Trash2, Upload } from 'lucide-react';
+import { Check, Download, Eye, Palette, Plus, RotateCcw, Settings, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import Loading from '../../components/Loading';
 import { useApi } from '../../contexts/AuthContext';
@@ -23,6 +23,7 @@ import { normalizeDisplayTheme } from '../../utils/displayTheme';
 import { notifyThemeUpdated } from '../../utils/themeEvents';
 import { fetchPublicBootstrap, type PublicBootstrapPayload } from '../../utils/publicBootstrap';
 import ThemePreviewFrame from '../../components/ThemePreviewFrame';
+import { downloadFile } from '../../infrastructure/ui';
 
 type ThemeConfigItem = {
   key?: string;
@@ -130,6 +131,7 @@ export default function AdminThemes() {
   const apiFetch = useApi();
   const { setDisplayTheme } = useDisplayTheme();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const preferencesInputRef = useRef<HTMLInputElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [themes, setThemes] = useState<ThemeCard[]>([]);
@@ -137,7 +139,7 @@ export default function AdminThemes() {
   const [editConfig, setEditConfig] = useState<Record<string, unknown>>({});
   const [customCss, setCustomCss] = useState('');
   const [deleting, setDeleting] = useState<ThemeCard | null>(null);
-  const [preview, setPreview] = useState<{ bootstrap: PublicBootstrapPayload; css: string } | null>(null);
+  const [preview, setPreview] = useState<{ bootstrap: PublicBootstrapPayload; css: string; short: string; config: Record<string, unknown> } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const previewRequestRef = useRef(0);
 
@@ -167,6 +169,26 @@ export default function AdminThemes() {
   useEffect(() => {
     return () => { previewRequestRef.current += 1; };
   }, []);
+
+  async function importPreferences(file: File | undefined) {
+    if (!file) return;
+    try {
+      if (file.size > 256 * 1024) throw new Error('主题配置文件不能超过 256 KB');
+      const payload = JSON.parse(await file.text());
+      if (payload.schema_version !== 1 || typeof payload.short !== 'string' || typeof payload.custom_css !== 'string' || !payload.config || typeof payload.config !== 'object' || Array.isArray(payload.config)) throw new Error('不是有效的 CVM 主题配置');
+      const theme = themes.find(item => item.short === payload.short);
+      if (!theme?.configurable) throw new Error('请先安装此配置对应的主题');
+      openConfig(theme);
+      setEditConfig(payload.config);
+      setCustomCss(payload.custom_css);
+      toast.success('配置已加载到编辑器，预览后保存即可生效');
+    } catch (error) { toast.error(error instanceof Error ? error.message : '导入失败'); }
+    finally { if (preferencesInputRef.current) preferencesInputRef.current.value = ''; }
+  }
+
+  function exportPreferences(theme: ThemeCard) {
+    downloadFile(`cvm-theme-${theme.short}.json`, JSON.stringify({ schema_version: 1, short: theme.short, config: theme.config, custom_css: theme.custom_css }, null, 2));
+  }
 
   async function handleUpload(file: File | null) {
     if (!file) return;
@@ -224,12 +246,20 @@ export default function AdminThemes() {
   }
 
   async function previewCustomCss() {
+    if (!editing) return;
     const request = ++previewRequestRef.current;
+    setPreview(null);
     setPreviewing(true);
     try {
-      const bootstrap = await fetchPublicBootstrap({ cacheBust: true });
+      const [bootstrap, compiled] = await Promise.all([
+        fetchPublicBootstrap({ cacheBust: true }),
+        apiFetch('/admin/themes/preview', {
+          method: 'POST',
+          body: JSON.stringify({ short: editing.short, config: editConfig, custom_css: customCss }),
+        }) as Promise<{ css: string; short: string; config: Record<string, unknown> }>,
+      ]);
       if (request !== previewRequestRef.current) return;
-      setPreview({ bootstrap, css: customCss });
+      setPreview({ bootstrap, ...compiled });
       toast.success('前台主题预览已更新');
     } catch (error) {
       if (request === previewRequestRef.current) toast.error(error instanceof Error ? error.message : '预览加载失败');
@@ -399,10 +429,12 @@ export default function AdminThemes() {
         hidden
         onChange={event => void handleUpload(event.target.files?.[0] || null)}
       />
+      <input ref={preferencesInputRef} type="file" accept=".json,application/json" hidden onChange={event => void importPreferences(event.target.files?.[0])} />
       <Flex className="admin-theme-page-actions" justify="between" gap="3" wrap="wrap">
         <Text as="p" size="1" color="gray" className="admin-theme-package-guidance">
           主题包根目录需要 cf-monitor-theme.json；支持 CSS、图片、JSON 和 .woff2 字体；配置项支持 title、switch、select、number、string、richtext、color、image、range。
         </Text>
+        <Button size="2" variant="soft" disabled={saving} onClick={() => preferencesInputRef.current?.click()}><Upload size={14} />导入主题配置</Button>
         <Button className="admin-theme-upload-action" size="2" disabled={saving} onClick={() => fileInputRef.current?.click()}>
           <Upload size={14} />上传主题包
         </Button>
@@ -432,6 +464,7 @@ export default function AdminThemes() {
                 <Button size="2" variant="soft" disabled={!theme.configurable} onClick={() => openConfig(theme)}>
                   <Settings size={14} />配置
                 </Button>
+                <Button size="2" variant="soft" aria-label={`导出 ${theme.name} 主题配置`} onClick={() => exportPreferences(theme)}><Download size={14} /></Button>
                 <Button size="2" color="red" variant="soft" disabled={!theme.deletable} onClick={() => setDeleting(theme)}>
                   <Trash2 size={14} />删除
                 </Button>
@@ -445,6 +478,16 @@ export default function AdminThemes() {
         <Dialog.Content aria-describedby={undefined} maxWidth="720px">
           <Dialog.Title>配置主题</Dialog.Title>
           <Flex direction="column" gap="4">
+            <Box>
+              <Text size="2" weight="medium">样式预设</Text>
+              <Text as="p" size="1" color="gray" mb="2">将预设追加到自定义 CSS，保存前可查看实际前台预览。</Text>
+              <Flex gap="2" wrap="wrap">
+                <Button size="1" variant="soft" onClick={() => insertCssSnippet('.node-card, .website-asset-card { border-radius: 12px; box-shadow: 0 2px 8px rgba(15,23,42,.04); }')}>清晰卡片</Button>
+                <Button size="1" variant="soft" onClick={() => insertCssSnippet('.node-card, .website-asset-card { border-radius: 8px; box-shadow: none; } .website-asset-card { padding: 14px; }')}>紧凑卡片</Button>
+                <Button size="1" variant="soft" onClick={() => insertCssSnippet('.recharts-cartesian-grid line { stroke-dasharray: 3 5; opacity: .35; } .recharts-line-curve { stroke-width: 2; }')}>细线图表</Button>
+                <Button size="1" variant="soft" onClick={() => insertCssSnippet('.recharts-area-area { fill-opacity: .16; } .recharts-line-curve { stroke-width: 2.5; }')}>柔和图表</Button>
+              </Flex>
+            </Box>
             {(editing?.manifest?.configuration?.data || []).map(renderConfigField)}
             <label className="admin-theme-config-field">
               <Text size="2" weight="medium">自定义 CSS</Text>
@@ -475,7 +518,7 @@ export default function AdminThemes() {
               <Dialog.Close><Button variant="soft">取消</Button></Dialog.Close>
               <Button disabled={saving} onClick={() => void saveConfig()}>保存</Button>
             </Flex>
-            {preview && <ThemePreviewFrame bootstrap={preview.bootstrap} css={preview.css} />}
+            {preview && <ThemePreviewFrame bootstrap={preview.bootstrap} css={preview.css} themeShort={preview.short} config={preview.config} />}
           </Flex>
         </Dialog.Content>
       </Dialog.Root>

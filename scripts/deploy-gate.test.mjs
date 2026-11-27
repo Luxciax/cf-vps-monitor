@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ADMIN_API_SCOPES } from '../worker/src/auth/admin-api-token.ts';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,12 +30,13 @@ function runDeployment({ verificationStatus = 0, ciGateStatus = 0, buildStatus =
   };
   let status = 0;
   try {
-    new Function('mkdirSync', 'readFileSync', 'rmSync', 'writeFileSync', 'dirname', 'join', 'fileURLToPath', 'spawnSync', 'process', 'console', 'prepareCloudflareVerificationEnv', source)(
+    new Function('mkdirSync', 'readFileSync', 'rmSync', 'writeFileSync', 'dirname', 'join', 'fileURLToPath', 'spawnSync', 'process', 'console', 'prepareCloudflareVerificationEnv', 'ADMIN_API_SCOPES', source)(
       path => writes.push(path),
       () => 'name = "synthetic-worker"\nmain = "worker/src/index.ts"\n[vars]\nSUPABASE_URL = "https://PROJECT_REF.supabase.co"\nADMIN_API_TOKEN_SCOPES = "read"\n',
       path => writes.push(path), (path, content) => { writes.push(path); fileWrites.push({ path, content: String(content) }); }, dirname, join, fileURLToPath, spawn, fakeProcess,
       { log() {}, error() {} },
       () => { if (preparationFails) throw new Error('Synthetic tool preparation failure'); return fakeProcess.env; },
+      ADMIN_API_SCOPES,
     );
   } catch (error) { if (!(error instanceof Exit)) throw error; status = error.status; }
   return { status, calls, writes, fileWrites };

@@ -84,6 +84,8 @@ function normalizeWebsiteSummary(input: unknown, options: { includeHidden?: bool
     method: value.method === 'TCP' || value.method === 'HEAD' || value.method === 'GET' ? value.method : undefined,
     interval_sec: typeof value.interval_sec === 'number' ? value.interval_sec : 120,
     status,
+    tls_expires_at: typeof value.tls_expires_at === 'string' ? value.tls_expires_at : null,
+    tls_observed_at: typeof value.tls_observed_at === 'string' ? value.tls_observed_at : null,
     last_checked_at: typeof value.last_checked_at === 'string' ? value.last_checked_at : (typeof latestCheck?.checked_at === 'string' ? latestCheck.checked_at : null),
     last_status_code: typeof value.last_status_code === 'number' ? value.last_status_code : (typeof latestCheck?.status_code === 'number' ? latestCheck.status_code : null),
     last_raw_status_code: typeof value.last_raw_status_code === 'number' ? value.last_raw_status_code : (typeof latestCheck?.raw_status_code === 'number' ? latestCheck.raw_status_code : null),

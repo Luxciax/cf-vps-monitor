@@ -210,6 +210,7 @@ export default function Layout() {
           <a href={githubUrl} target="_blank" rel="noreferrer" aria-label="GitHub">
             <Github size={16} />
           </a>
+          <span aria-hidden="true">·</span><a href="/third-party-notices.txt" target="_blank" rel="noopener noreferrer">开源声明</a>
         </Text>
       </footer>
     </div>

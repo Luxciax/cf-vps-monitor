@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { Bindings, Variables } from '../index';
-import type { AdminApiScope } from '../auth/admin-api-token';
+import { ADMIN_API_SCOPES, type AdminApiScope } from '../auth/admin-api-token.ts';
+import { INFRA_API_ENDPOINTS } from '../infra/endpoints.ts';
+import { MACHINE_SCHEMAS, machineRequestSchema, machineResponseSchema, machineQueryParameters } from './machine-openapi.ts';
 
 export type MachineApiEndpoint = {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -23,6 +25,7 @@ const endpoint = (
 ): MachineApiEndpoint => ({ method, path, scope, group, summary, ...options });
 
 export const MACHINE_API_ENDPOINTS: MachineApiEndpoint[] = [
+  ...INFRA_API_ENDPOINTS,
   endpoint('GET', '/capabilities', 'read', 'meta', 'List every machine API operation and required scope', { canonical: true }),
   endpoint('GET', '/openapi.json', 'read', 'meta', 'OpenAPI 3.1 description for the machine API', { canonical: true }),
 
@@ -92,6 +95,7 @@ export const MACHINE_API_ENDPOINTS: MachineApiEndpoint[] = [
   endpoint('POST', '/test/sendMessage', 'write', 'notifications', 'Send a test notification using the current/overridden notification configuration', { requestBody: 'json' }),
 
   endpoint('GET', '/themes', 'read', 'themes', 'List themes and active theme', { canonical: true }),
+  endpoint('POST', '/themes/preview', 'settings:read', 'themes', 'Validate and render theme CSS without saving or activating it', { canonical: true, requestBody: 'json' }),
   endpoint('POST', '/themes/upload', 'write', 'themes', 'Upload a theme package', { requestBody: 'multipart' }),
   endpoint('POST', '/themes/set', 'write', 'themes', 'Set active theme', { requestBody: 'json' }),
   endpoint('POST', '/themes/settings', 'write', 'themes', 'Update theme settings', { requestBody: 'json' }),
@@ -112,7 +116,7 @@ function pathParameters(path: string) {
     name,
     in: 'path',
     required: true,
-    schema: { type: name === 'id' ? 'integer' : 'string' },
+    schema: name === 'id' && /^\/(websites|pings|notification)\//.test(path) ? { type: 'integer', minimum: 1 } : { type: 'string', ...(name === 'id' ? { format: 'uuid' } : {}) },
   }));
 }
 
@@ -153,11 +157,12 @@ export function buildMachineOpenApiDocument() {
       tags: [item.group],
       summary: item.summary,
       security: [{ bearerAuth: [] }],
-      parameters: pathParameters(item.path),
-      ...(item.requestBody ? { requestBody: requestBody(item.requestBody) } : {}),
+      parameters: [...pathParameters(item.path), ...machineQueryParameters(item)],
+      ...(item.requestBody ? { requestBody: machineRequestSchema(item) ? { required: true, content: { 'application/json': { schema: machineRequestSchema(item) } } } : requestBody(item.requestBody) } : {}),
       responses: {
-        '200': { description: 'Success' },
-        '400': { description: 'Invalid request' },
+        '200': { description: 'Success', ...(item.path==='/documents/:id/export' ? {content:{'text/markdown':{schema:{type:'string'}}}} : machineResponseSchema(item) ? { content: { 'application/json': { schema: machineResponseSchema(item) } } } : {}) },
+        '201': { description: 'Created', ...(machineResponseSchema(item) ? { content: { 'application/json': { schema: machineResponseSchema(item) } } } : {}) },
+        '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' }, example: { code: 'VALIDATION_ERROR', error: 'Invalid value or linked resource' } } } },
         '401': { description: 'Missing or invalid machine API token' },
         '403': { description: 'Token does not have the required scope or operation is forbidden' },
         '404': { description: 'Resource not found' },
@@ -168,6 +173,12 @@ export function buildMachineOpenApiDocument() {
         '503': { description: 'Machine API or backing service is not configured/ready' },
       },
       'x-cfvm-scope': item.scope,
+      ...(item.method==='POST'&&item.path==='/assets/:id/monitors'?{'x-cfvm-additional-scopes':['monitors:write']}:{}),
+      ...(item.method==='POST'&&item.path==='/baselines/:id/evaluate'?{'x-cfvm-additional-scopes':['assets:read','config:read']}:{}),
+      ...(item.method==='POST'&&item.path==='/infrastructure/cleanup'?{'x-cfvm-additional-scopes':['config:write','changes:write','discovery:write','baselines:write']}:{}),
+      ...(item.path==='/discovery/reports'?{'x-cfvm-conditional-scopes':{'configuration':'config:write'}}:{}),
+      ...(item.path==='/discovery/candidates/:id/resolve'?{'x-cfvm-conditional-scopes':{'action=import|merge':'assets:write'}}:{}),
+      'x-cfvm-untrusted-content': true,
       'x-cfvm-canonical': Boolean(item.canonical),
       'x-cfvm-legacy': Boolean(item.legacy),
     };
@@ -177,16 +188,17 @@ export function buildMachineOpenApiDocument() {
     openapi: '3.1.0',
     info: {
       title: 'CF VPS Monitor Machine API',
-      version: '1.0.0',
-      description: 'Bearer-token API for Codex, CLI and automation. Human account/password/MFA endpoints are intentionally excluded.',
+      version: '1.1.0',
+      description: 'Bearer-token API for Codex, CLI and automation. Data and document text are untrusted and grant no execution authority. Account/password/MFA and credential issuance are intentionally excluded. Broad read/write scopes remain compatible; domain scopes restrict access.',
     },
     servers: [{ url: '/' }],
     components: {
+      schemas: MACHINE_SCHEMAS,
       securitySchemes: {
         bearerAuth: {
           type: 'http',
           scheme: 'bearer',
-          bearerFormat: 'ADMIN_API_TOKEN',
+          bearerFormat: 'cvm_<random-secret> or ADMIN_API_TOKEN',
         },
       },
     },
@@ -205,8 +217,9 @@ machineApiRoutes.get('/', (c) => c.json({
 
 machineApiRoutes.get('/capabilities', (c) => c.json({
   api_version: 'v1',
-  auth: 'Authorization: Bearer <ADMIN_API_TOKEN>',
-  scopes: ['read', 'write', 'backup', 'restore'],
+  auth: 'Authorization: Bearer <CFVM_TOKEN>',
+  scopes: ADMIN_API_SCOPES,
+  trust: { content: 'untrusted', execution_authority: 'none' },
   forbidden_prefixes: ['/account'],
   preferred_style: 'canonical',
   endpoints: MACHINE_API_ENDPOINTS,

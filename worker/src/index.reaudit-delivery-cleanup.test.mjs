@@ -11,6 +11,7 @@ async function fixture(t) {
   const transport = (name, args) => { calls.push(name); return rpc(database, name, args); };
   const history = name => (_db, before) => transport(name, { input_before_time: before });
   const { runRecordCleanup } = await loadTypeScriptFunctions(new URL('./index.ts', import.meta.url), ['runRecordCleanup'], {
+    infra: (_env, operation, payload, actor) => rpc(database, 'cfm_infra', {p_operation: operation, p_payload: payload, p_actor: actor}),
     RECORD_CLEANUP_LAST_RUN_KEY: 'maintenance_last_cleanup_at', RECORD_CLEANUP_INTERVAL_MS: 86400000,
     db: {
       deleteOldRecords: history('cfm_delete_old_records'),

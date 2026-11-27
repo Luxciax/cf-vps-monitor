@@ -9,3 +9,7 @@ ADMIN_API_TOKEN=replace-with-a-random-machine-api-token-at-least-32-bytes
 
 # Optional machine API scopes. Defaults to read when omitted.
 ADMIN_API_TOKEN_SCOPES=read,write
+
+# Independent break-glass credential; leave recovery disabled except during recovery.
+ADMIN_RECOVERY_ENABLED=false
+# ADMIN_RECOVERY_TOKEN=<random 32-byte-or-longer token, unrelated to database keys>

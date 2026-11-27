@@ -21,7 +21,10 @@
     "deploy": "node scripts/deploy-cloudflare.mjs",
     "cfvm": "node scripts/cfvm.mjs",
     "dev:worker": "npm --prefix worker run dev",
-    "dev:frontend": "npm --prefix frontend run dev"
+    "dev:frontend": "npm --prefix frontend run dev",
+    "mcp": "node scripts/cvm-mcp.mjs",
+    "test:core": "node --test --test-concurrency=4 worker/src/infra/infrastructure-core.test.mjs worker/src/infra/identity-integrity.test.mjs worker/src/infra/document-applicability.test.mjs worker/src/infra/security-boundaries.test.mjs worker/src/auth/admin-api-token.test.mjs worker/src/auth/machine-security.test.mjs worker/src/auth/mfa-policy.test.mjs worker/src/routes/machine-api.test.mjs worker/src/routes/theme.preview.test.mjs worker/src/utils/monitoring-core.test.mjs worker/src/index.monitoring-core.test.mjs worker/src/utils/backup.website-roundtrip.test.mjs worker/src/db/supabase-api/backup-website-restore.test.mjs worker/src/db/supabase-api/website-assets-merge.test.mjs worker/src/index.cleanup-continuation.test.mjs worker/src/index.reaudit-delivery-cleanup.test.mjs frontend/test/infrastructure-core.test.mjs frontend/src/components/website-hide-url.test.mjs scripts/cvm-mcp.test.mjs scripts/provider-discovery.test.mjs scripts/security-gate.test.mjs scripts/deploy-gate.test.mjs agent/install-branch-consistency.test.mjs agent/release-version.test.mjs",
+    "verify:core": "npm run lint && npm run build && npm run test:core"
   },
   "cloudflare": {
     "bindings": {

@@ -16,7 +16,7 @@ function heartbeatResultText(check: WebsiteHeartbeatPoint) {
   const result = check.effective_status === 'down' || !check.ok ? '失效' : '正常';
   const statusCode = check.raw_status_code ?? check.status_code;
   const http = statusCode == null ? '' : ` · HTTP ${statusCode}`;
-  return `${new Date(check.checked_at).toLocaleString()} · ${result}${http} · ${check.latency_ms ?? 0}ms`;
+  return `${new Date(check.checked_at).toLocaleString()} · ${result}${http} · ${check.latency_ms == null ? '延迟未知' : `${check.latency_ms}ms`}`;
 }
 
 type HeartbeatTooltip = {
@@ -31,7 +31,6 @@ type HeartbeatTooltip = {
 export default function WebsiteHeartbeatBar({
   checks,
   max = 60,
-  fallbackStatus = 'pending',
 }: {
   checks: Array<WebsiteHeartbeatPoint | null>;
   max?: number;
@@ -41,23 +40,7 @@ export default function WebsiteHeartbeatBar({
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<HeartbeatTooltip | null>(null);
   const blanks = Math.max(0, max - visible.length);
-  const hasRealCheck = visible.some((check) => Boolean(check));
-  const inferHealthyGap = fallbackStatus === 'up' && hasRealCheck;
-  const inferredGap = (key: string) => inferHealthyGap
-    ? ({
-        key,
-        state: 'up',
-        title: '历史数据缺失 · 当前状态在线（推定）',
-        interactive: true,
-        inferred: true,
-      })
-    : ({
-        key,
-        state: 'empty',
-        title: '暂无数据',
-        interactive: false,
-        inferred: false,
-      });
+  const inferredGap = (key: string) => ({ key, state: 'empty', title: '历史数据缺失 · 状态未知', interactive: true, inferred: false });
   const bars = [
     ...Array.from({ length: blanks }, (_, index) => inferredGap(`blank-${index}`)),
     ...visible.map((check, index) => check ? ({
@@ -113,7 +96,7 @@ export default function WebsiteHeartbeatBar({
 
   return (
     <div
-      className={`website-heartbeat-bar is-${latest?.ok ? 'up' : visible.length ? 'down' : 'pending'}`}
+      className={`website-heartbeat-bar is-${latest ? (latest.ok ? 'up' : 'down') : 'pending'}`}
       aria-label="Website heartbeat history"
       style={{ '--heartbeat-segment-count': max } as CSSProperties}
     >

@@ -1,3 +1,5 @@
+import { adminSettingsResponse } from '../auth/settings-response';
+import { isWebsiteInMaintenance } from '../utils/website-check-config';
 /**
  * 管理员 API 路由
  */
@@ -2519,6 +2521,7 @@ adminRoutes.post('/websites/:id/check', async (c) => {
     const database = getDatabase(c.env);
     const monitor = await db.getWebsiteMonitor(database, id);
     if (!monitor) return c.json({ error: '网站监控不存在' }, 404);
+    if (isWebsiteInMaintenance(monitor.check_config)) return c.json({ code: 'MONITOR_IN_MAINTENANCE', error: '监控处于计划维护窗口，未执行探测' }, 409);
     const check = await checkWebsiteMonitorHttp(monitor);
     const updated = await db.recordWebsiteCheck(database, check);
     invalidateWebsiteMonitorPublicState(c, updated ? { upsert: [updated] } : true);
@@ -2628,7 +2631,7 @@ adminRoutes.get('/settings', async (c) => {
   }
 
   const settings = await db.getAllSettings(database, isQueryFlagEnabled(c.req.query('refresh')));
-  return c.json(buildAdminSettings(settings));
+  return c.json(adminSettingsResponse(buildAdminSettings(settings)));
 });
 
 // 修改设置

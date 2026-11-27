@@ -41,7 +41,7 @@ export default function WebsiteMonitorDetails({ monitor }: { monitor: WebsiteMon
         </Box>
         <Box className="kuma-monitor-latency">
           <Text size="1" color="gray">延迟</Text>
-          <Text size="5" weight="bold">{monitor.last_latency_ms ?? 0}ms</Text>
+          <Text size="5" weight="bold">{monitor.last_latency_ms == null ? '—' : `${monitor.last_latency_ms}ms`}</Text>
         </Box>
       </Flex>
 
@@ -75,7 +75,7 @@ export default function WebsiteMonitorDetails({ monitor }: { monitor: WebsiteMon
               <Table.Cell>
                 <Badge color={check.ok ? 'green' : 'red'} variant="soft">{check.ok ? 'UP' : 'DOWN'}</Badge>
               </Table.Cell>
-              <Table.Cell>{check.latency_ms ?? 0}ms</Table.Cell>
+              <Table.Cell>{check.latency_ms == null ? '—' : `${check.latency_ms}ms`}</Table.Cell>
             </Table.Row>
           ))}
         </Table.Body>
@@ -98,7 +98,7 @@ export default function WebsiteMonitorDetails({ monitor }: { monitor: WebsiteMon
                 <Table.Cell>
                   <Badge color={check.ok ? 'green' : 'red'} variant="soft">{check.ok ? 'UP' : 'DOWN'}</Badge>
                 </Table.Cell>
-                <Table.Cell>{check.latency_ms ?? 0}ms</Table.Cell>
+                <Table.Cell>{check.latency_ms == null ? '—' : `${check.latency_ms}ms`}</Table.Cell>
                 <Table.Cell>{new Date(check.checked_at).toLocaleString()}</Table.Cell>
               </Table.Row>
             ))}

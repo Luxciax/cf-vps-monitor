@@ -1,7 +1,12 @@
 ![Stars](https://img.shields.io/github/stars/kadidalax/cf-vps-monitor?style=for-the-badge&logo=github&label=Stars&color=ffb000) ![Forks](https://img.shields.io/github/forks/kadidalax/cf-vps-monitor?style=for-the-badge&logo=github&label=Forks&color=2ea44f) ![License](https://img.shields.io/github/license/kadidalax/cf-vps-monitor?style=for-the-badge&color=blue)
 # CF VPS Monitor
 
-CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承载前端、API、实时连接和定时任务，使用 Durable Objects 协调实时状态，使用 Supabase Postgres 保存配置和历史数据，使用 Go Agent 在服务器上采集指标。
+CF VPS Monitor（CVM）是轻量的个人基础设施资产管理与监控中心，使用 Cloudflare Workers 承载前端、API、实时连接和定时任务，使用 Durable Objects 协调实时状态，使用 Supabase Postgres 保存配置和历史数据，使用 Go Agent 在服务器上采集指标与固定范围的只读发现信息。
+
+统一资产、Discovery Inbox、配置基线、运维知识库与 AI 上下文都复用原监控和权限系统。
+CVM 不执行 SSH、Shell、Docker Exec 或运维脚本；服务器操作交给用户授权的外部操作者。
+完整功能矩阵与实际边界见 [实现审查记录](docs/CVM_IMPLEMENTATION_REVIEW.md)，
+验证结果见 [VERIFICATION.md](docs/VERIFICATION.md)。
 
 
 ## 特性
@@ -14,7 +19,12 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 - **机器 API / CLI**：`/api/v1/*` 使用独立 Bearer Token 与 scope，可供 Codex、脚本和 CLI 直接操作，不复用浏览器 Cookie/CSRF 会话。
 - **通知**：支持 Telegram 、 SMTP Email 和 Webhook，可配置离线、到期、负载以及网站监控相关通知。
 - **主题**：内置 `monitor` 和 `aurora` 主题，支持主题包、自定义 CSS、图片和字体资源。
-- **管理员恢复**：首次登录时创建管理员；忘记账号或密码时，可在登录页用当前部署的 Supabase Secret key 重置唯一管理员。
+- **管理员恢复**：首次登录时创建管理员；恢复默认关闭，可临时启用独立 `ADMIN_RECOVERY_TOKEN` 恢复唯一管理员，兼容 Proxy 模式，不使用数据库 Secret 作为恢复密码。
+- **基础设施台账**：VPS、网站、API、域名、容器、Compose、仓库、部署、云资源等统一身份、关系、导入/合并、分类、费用与生命周期。
+- **发现与配置**：默认关闭的只读 Agent 发现及本地 Cloudflare/GitHub 采集器；候选确认、持续同步、配置快照、基线、变化证据；不可用能力显示未知。
+- **运维知识库**：Markdown 编辑/安全预览、适用范围、版本、资产关联、搜索与导入导出，内置 15 篇包含验证和回滚的 SOP。
+- **AI 上下文与 MCP**：多个独立 Machine Token、细粒度权限、OpenAPI/CLI、实际 stdio MCP；上下文按权限、时间和大小限制返回，外部操作只记为声明。
+- **监控增强**：TLS 实测到期、HTTP 关键词/JSON、DNS/WebSocket、网站维护/静默、观测覆盖率、P50/P95/P99 与故障区间。
 - **省配额策略**：有实时观看者时 Agent 约 3 秒采集并上报；无人查看时约 120 秒采样并批量上报。可用节点数取决于 Ping 任务、访问量、上报方式以及数据库和实时服务的独立额度，请在后台容量估算中核对，不能仅凭 Worker 请求量保证免费运行 50 台。
 
 节点温度目前仅支持 Linux 上可识别的 CPU/SoC 传感器，多个有效读数取最高值。没有传感器或读取失败，以及当前 Windows、macOS、FreeBSD 安装包，均显示“不可用”；真实 0°C 和负温度仍是有效读数。GPU 温度独立显示。旧 Agent 需要升级才能使用这一规则，旧历史中的 0 不会被猜测改写。
@@ -47,19 +57,25 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 | `JWT_SECRET`          | Secret   | 后台会话签名密钥，必须至少 32 字节；英文/数字不少于 32 个字符                                   |
 | `ADMIN_API_TOKEN`      | Secret   | 可选机器 API Bearer Token，至少 32 字节；建议用 `npm run cfvm -- token generate` 生成               |
 | `ADMIN_API_TOKEN_SCOPES` | Variable | 可选机器 API 权限，默认 `read`；Codex 常用 `read,write`，备份/恢复需单独加 `backup`/`restore` |
+| `ADMIN_RECOVERY_ENABLED` | Variable | 默认关闭；仅临时恢复时设置为 `true` |
+| `ADMIN_RECOVERY_TOKEN` | Secret | 独立恢复凭据，至少 32 字符；与数据库、Proxy、Machine 凭据分离 |
 
 `SUPABASE_SERVICE_ROLE_KEY` 仅作为旧部署兼容变量保留。数据库访问支持两种模式：默认直连模式使用 `SUPABASE_SECRET_KEY`；代理模式使用 `SUPABASE_PROXY_URL` + `SUPABASE_PROXY_TOKEN`，Worker 不再持有 Supabase 服务端 Secret。两组都存在时优先走代理。
 
+Proxy 升级前还需在 Supabase Edge Function 配置 `CFVM_PROXY_TOKEN_SHA256`；未配置时安全关闭。
+设置顺序、轮换和灾难恢复见 [安全与恢复](docs/SECURITY_AND_RECOVERY.md)。
+只读发现需要显式启用，操作边界和能力见 [Agent 发现说明](agent/DISCOVERY.md)。
+
 ## 面板部署
 
-在 Cloudflare 的 **Settings → Build → Build Variables and Secrets** 中设置 `NODE_VERSION=24`、`GO_VERSION=1.26.10`（与 `agent/go.mod` 保持一致）。Workers Builds 官方镜像已包含 Go，也能按 `go.mod` 自动选择工具链。部署入口会先运行前后端检查、构建和 JavaScript/Go 测试；检查失败时不会发布。
+在 Cloudflare 的 **Settings → Build → Build Variables and Secrets** 中设置 `NODE_VERSION=24`、`GO_VERSION=1.26.11`（与 `agent/go.mod` 保持一致）。Workers Builds 官方镜像已包含 Go，也能按 `go.mod` 自动选择工具链。部署入口会先运行前后端检查、构建和 JavaScript/Go 测试；检查失败时不会发布。
 
 ### Fork 原仓库部署【推荐，方便更新】
 
 
 1. 在 [Supabase](https://supabase.com/dashboard/) 创建或选择项目。
 2. 打开 Supabase 项目 **Project Overview** 页面复制 `Project URL`；打开 **Project Settings -> API Keys -> Publishable and secret API keys**，复制 **Secret keys** 中的 `default` Secret key，格式通常为 `sb_secret_...`。
-3. Fork [本仓库](https://github.com/kadidalax/cf-vps-monitor)， 创建自己的仓库。到Actions 选择**Agent Release** 点击**Run workflow** 填入创建自己的版本号，再次点击**Run workflow** 创建自己仓库的Agent 安装脚本。
+3. Fork [当前维护仓库](https://github.com/Luxciax/cf-vps-monitor)，创建自己的仓库。需要发布 Agent 时，在通过发布验证后使用已有 **Agent Release** 工作流并核对源码提交、版本与产物；不要把发布 Release 当作普通源码开发步骤。
 4. 打开 Cloudflare Dashboard 的 **Workers & Pages**，点击 **创建应用程序**， 点击**Continue with GitHub**。
 5. 选择 GitHub 账号和刚创建的 Fork 仓库，点击**下一步**。
 6. 展开 **高级设置** 配置 `SUPABASE_URL` 和 `JWT_SECRET`。数据库访问二选一：直连模式设置 `SUPABASE_SECRET_KEY`；代理模式先部署 `supabase/functions/cfvm-db-proxy/index.ts`，再设置 `SUPABASE_PROXY_URL` 与 Secret `SUPABASE_PROXY_TOKEN`。`JWT_SECRET` 必须至少 32 字节。
@@ -73,7 +89,7 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 
 ### 直接一键部署
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/kadidalax/cf-vps-monitor)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Luxciax/cf-vps-monitor)
 
 1. 在 [Supabase](https://supabase.com/dashboard/) 创建或选择项目。
 2. 打开 Supabase 项目 **Project Overview** 页面复制 `Project URL`；打开 **Project Settings -> API Keys -> Publishable and secret API keys**，复制 **Secret keys** 中的 `default` Secret key，格式通常为 `sb_secret_...`。
@@ -150,7 +166,7 @@ npm run cfvm -- clients remove <uuid>
 1. 登录后台。
 2. 在“服务器”添加节点。
 3. 打开节点安装命令，选择 Unix 自动检测或 Windows。复制安装命令。请确认你的安装脚本指向的仓库有效且你已经在actions里运行了创建agent脚本的workflow。
-   - 本 fork 默认从 `Luxciax/cf-vps-monitor` 获取安装脚本/源码；由于当前 fork 尚无 Agent Release，预编译二进制暂时仍从 `kadidalax/cf-vps-monitor` Release 获取。建立 fork Release 后应切换 `CF_MONITOR_AGENT_RELEASE_REPOSITORY`。
+   - 本 fork 的安装脚本、源码与 Release 默认均指向 `Luxciax/cf-vps-monitor`。包含本次新能力的 Release 尚未发布时，使用安装器的 `--build-from-source` 或匹配提交的本地构建，不把上游旧二进制当作已包含新发现能力。
 4. 在 VPS 上执行安装命令，等待 Agent 上线。
 5. 需要 Ping 监控时，在“Ping”创建任务。
 6. 需要网站监控时，在“网站”创建 HTTP/HTTPS 或 TCP 检测目标。
@@ -243,8 +259,8 @@ cd agent && go test ./...
 - 机器 API 使用独立高熵 Bearer Secret 和 scope，默认只读，且禁止账号/密码/MFA 操作。
 - Ping 与网站探测会拦截内网、回环、链路本地、组播、保留地址和元数据地址。
 - Supabase 迁移启用 RLS，并对 RPC 函数显式 `revoke` / `grant`；需要 `security definer` 的函数固定 `search_path`。
-- 忘记密码重置需要输入当前部署的 Supabase Secret key；该 key 只用于本次请求校验，不会被保存。
-- Agent 与 Worker 双向 WebSocket 都有消息大小边界；完整源码级审计记录见 [SECURITY_AUDIT.md](SECURITY_AUDIT.md)。
+- 忘记密码恢复默认关闭；仅在临时启用 `ADMIN_RECOVERY_ENABLED=true` 后使用独立 `ADMIN_RECOVERY_TOKEN`。数据库、Proxy 与 Machine Token 都不是恢复凭据；恢复后禁用并轮换恢复凭据，重新登记 MFA。
+- Agent 与 Worker 双向 WebSocket 都有消息大小边界；本次源码审查、修复与验证范围见 [实现审查记录](docs/CVM_IMPLEMENTATION_REVIEW.md) 和 [安全与恢复](docs/SECURITY_AND_RECOVERY.md)。
 
 ## 许可证
 

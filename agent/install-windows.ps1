@@ -236,7 +236,8 @@ function Assert-AgentSystemResources {
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repository = "Luxciax/cf-vps-monitor"\n$releaseRepository = "kadidalax/cf-vps-monitor"
+$repository = "Luxciax/cf-vps-monitor"
+$releaseRepository = "Luxciax/cf-vps-monitor"
 $branch = "main"
 $autoBinaryUrl = $false
 

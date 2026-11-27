@@ -65,7 +65,7 @@ export function fixture() {
   };
 }
 
-export async function createHarness({ selection = 'ALL', playwrightModule } = {}) {
+export async function createHarness({ selection = 'ALL', playwrightModule, browserExecutable = process.env.CF_MONITOR_BROWSER_EXECUTABLE } = {}) {
   let modulePath;
   try {
     modulePath = playwrightModule ? resolve(playwrightModule) : require.resolve('playwright');
@@ -91,6 +91,7 @@ export async function createHarness({ selection = 'ALL', playwrightModule } = {}
     await server.listen();
     browser = await chromium.launch({
       headless: true,
+      ...(browserExecutable ? { executablePath: browserExecutable } : {}),
       args: ['--disable-background-networking', '--disable-component-update', '--disable-sync', '--no-first-run'],
     });
   } catch (error) {

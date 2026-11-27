@@ -5,6 +5,13 @@ import { authorizeAdminApiRequest } from './admin-api-token.ts';
 
 const TOKEN = 'a'.repeat(64);
 
+test('legacy tokens retain compatibility even when their user-chosen prefix resembles database tokens', async () => {
+  const token = 'cvm_' + 'b'.repeat(64);
+  const result = await authorizeAdminApiRequest({authorization:`Bearer ${token}`,method:'GET',pathname:'/api/v1/clients',env:{ADMIN_API_TOKEN:token},lookupToken:()=>{throw new Error('legacy token must not require a new migration');}});
+  assert.equal(result.ok,true);
+  assert.match(result.principal,/^api:/);
+});
+
 function auth(pathname, method = 'GET', scopes, provided = TOKEN) {
   return authorizeAdminApiRequest({
     authorization: provided ? `Bearer ${provided}` : undefined,
@@ -43,6 +50,14 @@ test('machine API separates write, backup and restore privileges', async () => {
   );
   assert.equal((await auth('/api/v1/download/backup', 'POST', 'backup')).ok, true);
   assert.equal((await auth('/api/v1/upload/backup', 'POST', 'restore')).ok, true);
+});
+
+test('theme preview uses settings read scope without granting persistence privileges', async () => {
+  const preview = await auth('/api/v1/themes/preview', 'POST', 'settings:read');
+  assert.equal(preview.ok, true);
+  assert.equal(preview.requiredScope, 'settings:read');
+  assert.equal((await auth('/api/v1/themes/settings', 'POST', 'settings:read')).ok, false);
+  assert.equal((await auth('/api/v1/themes/preview', 'POST', 'assets:read')).ok, false);
 });
 
 test('machine API treats DELETE as write and rejects invalid scope configuration', async () => {

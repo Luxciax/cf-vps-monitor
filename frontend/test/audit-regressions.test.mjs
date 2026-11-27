@@ -164,20 +164,27 @@ test('AUD-52 restore invalidates prefetched general settings and reloads restore
   assert.equal(settingsCacheRef.current.site.site_title, 'B');
 });
 
-test('AUD-05 initial administrator form requires and sends ownership key', async () => {
+test('AUD-05 initial administrator and recovery forms require an independent recovery credential', async () => {
   for (const adminPresent of [false, true]) {
     for (const key of ['', 'synthetic-owner-proof']) {
       const bodies = [];
       const errors = [];
       const submit = productionDeclaration('src/pages/Login.tsx', 'handleRecoverySubmit', {
-        recoveryStatus: { admin_present: adminPresent }, recoveryKey: key, recoveryUsername: 'synthetic-owner', recoveryPassword: 'synthetic-password',
-        fetch: async (_url, options) => { bodies.push(JSON.parse(options.body)); return new Response(JSON.stringify({ mode: 'created' })); },
+        recoveryStatus: { enabled: true, admin_present: adminPresent, recoverable: true }, recoveryKey: key, recoveryUsername: 'synthetic-owner', recoveryPassword: 'synthetic-password',
+        fetch: async (_url, options) => { bodies.push(JSON.parse(options.body)); return new Response(JSON.stringify({ mode: adminPresent ? 'reset' : 'created' })); },
         toast: { error: message => errors.push(message), success() {} }, setRecoveryLoading() {}, setUsername() {}, setPassword() {}, setRecoveryPassword() {}, setRecoveryKey() {}, setRecoveryStatus() {}, setRecoveryMode() {},
       });
       await submit({ preventDefault() {} });
       assert.equal(bodies.length, key ? 1 : 0, 'ownership is required for initial creation as well as recovery');
-      if (key) assert.equal(bodies[0].supabase_secret_key, 'synthetic-owner-proof');
-      else assert.equal(errors.length, 1);
+      if (key) {
+        assert.deepEqual(bodies[0], {
+          username: 'synthetic-owner',
+          password: 'synthetic-password',
+          recovery_token: 'synthetic-owner-proof',
+        }, 'only the independent recovery credential and new account fields are submitted');
+        assert.equal(Object.keys(bodies[0]).some(field => /supabase/i.test(field)), false, 'database credentials must never be sent by the recovery form');
+        assert.equal(errors.length, 0);
+      } else assert.equal(errors.length, 1);
     }
   }
 });

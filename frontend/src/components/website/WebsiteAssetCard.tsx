@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  Cloud,
+  Tag,
   Container,
   ExternalLink,
   Globe2,
@@ -112,7 +112,7 @@ export default function WebsiteAssetCard({
             <span className="website-asset-status-dot" aria-hidden="true" />
             {statusLabels[monitor.status]}
           </span>
-          <strong>{asset.uptime}</strong>
+          <strong title="已取得探测样本的成功率；缺测覆盖率与按时间计算的可用率请查看详情">样本 {asset.uptime}</strong>
         </div>
       </header>
 
@@ -133,7 +133,7 @@ export default function WebsiteAssetCard({
       <div className="website-asset-meta">
         <span title={`服务器：${metadata.server}`}><Server size={14} />{metadata.server}</span>
         <span title={`部署方式：${metadata.deployment}`}><Container size={14} />{metadata.deployment}</span>
-        <span title="接入层"><Cloud size={14} />{visibleTags[1] || '直连'}</span>
+        <span title="标签"><Tag size={14} />{visibleTags[1] || '未设标签'}</span>
         <span title={`${protocolLabel(monitor)} · ${latency}`}><Timer size={14} />{latency}</span>
       </div>
 

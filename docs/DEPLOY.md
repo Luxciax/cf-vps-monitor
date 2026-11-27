@@ -25,8 +25,10 @@ Optional machine API configuration:
 
 | Name | Type | Purpose |
 | --- | --- | --- |
-| `ADMIN_API_TOKEN` | Secret | Bearer token for Codex/CLI/API |
-| `ADMIN_API_TOKEN_SCOPES` | Variable | `read` by default; usually `read,write` for Codex |
+| `ADMIN_API_TOKEN` | Secret | Optional legacy Bearer token; independent database tokens are managed in the authenticated UI |
+| `ADMIN_API_TOKEN_SCOPES` | Variable | `read` by default; prefer the fine-grained scopes documented in API.md |
+| `ADMIN_RECOVERY_ENABLED` | Variable | `false` by default; enable only for an intended administrator recovery |
+| `ADMIN_RECOVERY_TOKEN` | Secret | Independent random recovery secret, at least 32 characters; never a Supabase key |
 
 ## Cloudflare Workers Builds
 
@@ -46,6 +48,7 @@ SUPABASE_SECRET_KEY=<secret>
 JWT_SECRET=<random secret at least 32 bytes>
 ADMIN_API_TOKEN=<64 hex characters recommended>
 ADMIN_API_TOKEN_SCOPES=read,write
+ADMIN_RECOVERY_ENABLED=false
 ```
 
 `JWT_SECRET` and `ADMIN_API_TOKEN` should be Secrets. For database access, configure either direct mode (`SUPABASE_SECRET_KEY`) or proxy mode (`SUPABASE_PROXY_URL` + `SUPABASE_PROXY_TOKEN`). Proxy mode keeps the Supabase server key inside Supabase Edge Functions; the Worker prefers proxy mode when both are configured.
@@ -92,9 +95,24 @@ npx wrangler secret put SUPABASE_SECRET_KEY
 npx wrangler secret put JWT_SECRET
 ```
 
-Proxy mode keeps the Supabase server key inside Supabase Edge Functions. Deploy
-`supabase/functions/cfvm-db-proxy/index.ts`, generate a random proxy token, replace
-`EXPECTED_TOKEN_SHA256` with its SHA-256 verifier, then configure:
+Proxy mode keeps the Supabase server key inside Supabase Edge Functions. Generate
+a random token locally (`npm run cfvm -- token generate`) and place it in the
+Worker's `SUPABASE_PROXY_TOKEN` secret. Calculate its SHA-256 hex verifier locally
+without logging the token. Set that verifier as the **Supabase Edge Function
+secret** `CFVM_PROXY_TOKEN_SHA256`, then deploy `cfvm-db-proxy`. The verifier is
+runtime configuration: never edit or commit authentication values in source.
+The function accepts only an explicit RPC/table allowlist and fails closed when its
+verifier is absent. It reads the Supabase-provided `SUPABASE_SECRET_KEYS.default`
+or legacy `SUPABASE_SERVICE_ROLE_KEY` inside Supabase.
+
+The function verifies the dedicated proxy token itself. If Supabase's gateway JWT
+verification is enabled for this function, deploy/configure this specific function
+with `verify_jwt=false` (CLI: `supabase functions deploy cfvm-db-proxy --no-verify-jwt`).
+This does not make the function anonymous: every request still requires the
+independent high-entropy `x-cfvm-proxy-token` header before any database access.
+Do not disable RLS, grant anonymous RPC permissions, or change unrelated functions.
+
+Configure the Worker:
 
 ```bash
 export SUPABASE_URL=https://PROJECT_REF.supabase.co
@@ -105,7 +123,15 @@ npx wrangler secret put JWT_SECRET
 
 Do not configure `SUPABASE_SECRET_KEY` on the Worker in proxy-only mode.
 
-Enable the machine API:
+**Upgrade ordering:** deployments of the previous proxy used a verifier embedded in
+source. Set `CFVM_PROXY_TOKEN_SHA256` to the verifier for the currently active Worker
+token **before** deploying the new function. Otherwise it intentionally returns 503.
+For rotation, see [SECURITY_AND_RECOVERY.md](SECURITY_AND_RECOVERY.md); a bounded
+overlap using the previous verifier is supported.
+
+After applying migrations, create independent Machine Tokens from the authenticated
+AI/API administration page. They work without an `ADMIN_API_TOKEN` Worker secret.
+To retain the optional legacy environment token:
 
 ```bash
 npm run cfvm -- token generate
@@ -139,7 +165,14 @@ https://YOUR-WORKER/db-init
 Run the database initialization/migration flow. Existing supported migrations are
 designed to preserve current account/node data.
 
-After schema-affecting updates, run `/db-init` again.
+After schema-affecting updates, run `/db-init` again. The timestamped migrations
+must run after legacy numeric migrations `1`–`8`; the manifest generator uses numeric
+ordering. The infrastructure schema migration adds/backfills inventory references
+for existing clients/websites without replacing their original monitoring tables.
+The additional migrations add inventory RPCs, token security, monitoring extensions,
+seeded SOPs/baselines and infrastructure configuration backup. Test against a copy
+of the database before updating a production instance; do not manually mark a failed
+migration as applied.
 
 ## Machine API smoke test
 
@@ -147,7 +180,7 @@ Configure the local/Codex client environment:
 
 ```bash
 export CFVM_URL=https://YOUR-WORKER
-export CFVM_TOKEN=<same value as ADMIN_API_TOKEN>
+export CFVM_TOKEN=<independent-token-or-legacy-ADMIN_API_TOKEN>
 ```
 
 Then:
@@ -210,14 +243,20 @@ assuming a source fix is present in an already-installed Agent binary.
 
 ## Troubleshooting
 
-### Machine API returns `API_DISABLED`
+### Machine API authentication fails
 
-`ADMIN_API_TOKEN` is not configured as a Worker Secret.
+For independent `cvm_…` tokens, verify that the token migration was applied and the
+token is active and unexpired. Rotation immediately invalidates the previous secret.
+For the legacy token, verify the Worker secret and `ADMIN_API_TOKEN_SCOPES`.
+`API_DISABLED` is retained for older deployments with no authentication backend;
+current database-token deployments do not require the legacy environment secret.
 
 ### Machine API returns `API_SCOPE_REQUIRED`
 
-The token is valid but `ADMIN_API_TOKEN_SCOPES` does not include the required scope.
-Routine management changes need `write`.
+The token is valid but its stored scopes (or legacy `ADMIN_API_TOKEN_SCOPES`) omit
+the response's `required_scope`. Grant the specific resource scope when creating a
+replacement token; do not fall back to a browser session to bypass a denied machine
+operation. Some composed operations require more than one scope.
 
 ### Codex can read but cannot delete
 
@@ -251,3 +290,29 @@ The response also contains the discovery/OpenAPI paths.
 
 The exact commit may not have a successful GitHub CI run. The deploy gate is
 fail-closed by design.
+
+### Administrator recovery in Proxy mode
+
+Recovery uses `ADMIN_RECOVERY_ENABLED=true` and an independent
+`ADMIN_RECOVERY_TOKEN`; it does not need or accept the Supabase server key. The
+normal setting is `false`. Recovery is rate limited and audited, resets MFA and
+invalidates prior account sessions. Disable it after the incident and rotate the
+recovery secret. Read the complete [recovery procedure and credential inventory](SECURITY_AND_RECOVERY.md)
+before using it.
+
+### Configuration backup versus full disaster recovery
+
+The encrypted application backup includes monitor configuration, infrastructure
+assets/relationships/links, current documents/baselines and their versions. It can
+contain Agent credentials and notification secrets and must be protected accordingly.
+Machine Tokens and administrator credentials are excluded. Configuration snapshots,
+discovery evidence, historical changes/evaluations and monitoring measurements need a
+separate database backup. Check [SECURITY_AND_RECOVERY.md](SECURITY_AND_RECOVERY.md)
+for restore order, compatible migrations, retention and verification.
+
+## Provenance
+
+The repository remains a fork of `kadidalax/cf-vps-monitor`. Preserve the original
+MIT copyright/license and Git history. Twemoji flags have a separate CC-BY 4.0
+graphics license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before
+redistributing source, builds or themes.

@@ -17,7 +17,7 @@ test('AUD-01/AUD-05: actual workerd, middleware and PostgreSQL enforce complete 
   await t.test('initial ownership and a real pair of stale HTTP observations', async () => {
     assert.equal((await post('/api/admin/recovery', credentials)).status, 403);
     f.synchronizeInitialCreation();
-    const responses = await Promise.all([1, 2].map(() => post('/api/admin/recovery', { ...credentials, supabase_secret_key: runtimeSecrets.SUPABASE_SECRET_KEY })));
+    const responses = await Promise.all([1, 2].map(() => post('/api/admin/recovery', { ...credentials, recovery_token: runtimeSecrets.ADMIN_RECOVERY_TOKEN })));
     assert.deepEqual(responses.map(response => response.status).sort(), [200, 409]);
     assert.equal((await f.database.query('select count(*)::int as count from users')).rows[0].count, 1);
   });

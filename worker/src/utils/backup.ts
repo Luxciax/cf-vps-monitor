@@ -1,3 +1,4 @@
+import { validateInventoryBackup, type InventoryBackup } from '../infra/backup.ts';
 import type {
   Client,
   ExpiryNotification,
@@ -37,6 +38,12 @@ export const BACKUP_EXCLUDED_MODULES = [
   'themes',
   'theme_assets',
   'audit_logs',
+  'machine_tokens',
+  'infra_configuration_snapshots',
+  'infra_changes',
+  'infra_discovery_runs',
+  'infra_discovery_candidates',
+  'infra_baseline_evaluations',
 ];
 export const MAX_BACKUP_BYTES = 5 * 1024 * 1024;
 
@@ -71,6 +78,7 @@ export interface BackupData {
   expiry_notifications?: ExpiryNotification[];
   load_notifications?: LoadNotification[];
   website_monitors?: WebsiteMonitorBackup[];
+  infrastructure?: InventoryBackup;
 }
 
 export interface EncryptedBackupData {
@@ -421,6 +429,7 @@ export function websiteMonitorConfiguration(monitor: WebsiteMonitor): WebsiteMon
     name: monitor.name,
     url: monitor.url,
     method: monitor.method,
+    check_config: monitor.check_config || {},
     expected_status_min: monitor.expected_status_min,
     expected_status_max: monitor.expected_status_max,
     interval_sec: monitor.interval_sec,
@@ -628,6 +637,11 @@ export function validateBackup(input: unknown): BackupValidationResult {
   if (websiteMonitors) {
     backup.website_monitors = validateWebsiteMonitors(websiteMonitors, errors, backup.clients);
     hasModule = true;
+  }
+
+  if (input.infrastructure !== undefined) {
+    try { backup.infrastructure = validateInventoryBackup(input.infrastructure); hasModule = true; }
+    catch (error) { errors.push(error instanceof Error ? error.message : 'Invalid infrastructure backup'); }
   }
 
   if (!hasModule) {

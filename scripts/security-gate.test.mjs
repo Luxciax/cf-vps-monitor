@@ -108,6 +108,14 @@ test('AUD-20 scanner failures and incomplete output fail closed', async () => {
   }
 });
 
+test('scanner failure reports findings even when download progress is present on stderr', async () => {
+  const result = await fixture({go:{status:3,stdout:'Vulnerability #1: GO-2026-SYNTHETIC\nFixed in: example@v2\n',stderr:'go: downloading scanner dependency\nexit status 3'}});
+  assert.equal(result.status,1);
+  assert.match(result.error.message,/GO-2026-SYNTHETIC/);
+  assert.match(result.error.message,/Fixed in: example@v2/);
+  assert.match(result.error.message,/downloading scanner dependency/);
+});
+
 test('AUD-20 clean scans allow verification only after both npm and the actual Agent toolchain are scanned', async () => {
   const result = await fixture();
   assert.equal(result.status, 0, result.error?.stack);

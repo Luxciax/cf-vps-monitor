@@ -4,7 +4,7 @@ import { readFile, readdir } from 'node:fs/promises';
 const migrations = new URL('../../supabase/migrations/', import.meta.url);
 
 export async function applyApplicationMigrations(database) {
-  const files = (await readdir(migrations)).filter(name => name.endsWith('.sql')).sort();
+  const files = (await readdir(migrations)).filter(name => name.endsWith('.sql')).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
   for (const file of files) {
     const sql = await readFile(new URL(file, migrations), 'utf8');
     await database.exec(`begin;\n${sql}\ncommit;`);

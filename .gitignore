@@ -55,10 +55,7 @@ Thumbs.db
 agent/cf-monitor-agent.exe
 agent/agent.exe
 
-# 文档仅本地保留；README 是仓库的部署/安装入口
-*.md
-!/README.md
-docs/
+# Repository documentation is part of the maintained product.
 
 # Trellis 工作流脚手架仅本地保留，不提交、不推送
 # 配套 .trellis/config.yaml 里的 session_auto_commit: false

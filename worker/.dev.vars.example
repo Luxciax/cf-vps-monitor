@@ -2,3 +2,7 @@
 # 这里只放 Worker Secret；普通变量 SUPABASE_URL 由 wrangler.toml 的 [vars] 声明。
 SUPABASE_SECRET_KEY=replace-with-supabase-secret-key-sb_secret
 JWT_SECRET=replace-with-a-long-random-local-dev-secret-at-least-32-bytes
+
+# Independent break-glass credential; leave recovery disabled except during recovery.
+ADMIN_RECOVERY_ENABLED=false
+# ADMIN_RECOVERY_TOKEN=<random 32-byte-or-longer token, unrelated to database keys>

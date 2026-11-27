@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { prepareCloudflareVerificationEnv } from './cloudflare-build-tools.mjs';
+import { ADMIN_API_SCOPES } from '../worker/src/auth/admin-api-token.ts';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const wrangler = join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -13,7 +14,7 @@ const requiredSecrets = ['JWT_SECRET'];
 const supabaseDirectSecretNames = ['SUPABASE_SECRET_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
 const supabaseProxySecretName = 'SUPABASE_PROXY_TOKEN';
 const supabaseAccessSecretNames = [...supabaseDirectSecretNames, supabaseProxySecretName];
-const optionalSecrets = ['ADMIN_API_TOKEN'];
+const optionalSecrets = ['ADMIN_API_TOKEN', 'ADMIN_RECOVERY_TOKEN'];
 const deployArgs = process.argv.slice(2);
 const isDryRun = deployArgs.includes('--dry-run');
 const isWorkersBuild = process.env.WORKERS_CI === '1';
@@ -110,10 +111,10 @@ function resolveAdminApiScopes() {
   const raw = process.env.ADMIN_API_TOKEN_SCOPES?.trim();
   if (!raw) return null;
   const scopes = raw.split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
-  const allowed = new Set(['read', 'write', 'backup', 'restore']);
+  const allowed = new Set(ADMIN_API_SCOPES);
   if (scopes.length === 1 && scopes[0] === '*') return '*';
   if (scopes.length === 0 || scopes.some(scope => !allowed.has(scope))) {
-    fail('ADMIN_API_TOKEN_SCOPES must be a comma-separated subset of read,write,backup,restore or exactly "*".');
+    fail('ADMIN_API_TOKEN_SCOPES must use documented machine scopes or exactly "*".');
   }
   return [...new Set(scopes)].join(',');
 }
@@ -180,6 +181,13 @@ function writeDeployConfig() {
     generated = /ADMIN_API_TOKEN_SCOPES\s*=/.test(generated)
       ? generated.replace(/ADMIN_API_TOKEN_SCOPES\s*=\s*"[^"]*"/, `ADMIN_API_TOKEN_SCOPES = "${adminApiScopes}"`)
       : generated.replace(/(\[vars\]\s*)/, `$1\nADMIN_API_TOKEN_SCOPES = "${adminApiScopes}"\n`);
+  }
+  const recoveryEnabled = process.env.ADMIN_RECOVERY_ENABLED?.trim();
+  if (recoveryEnabled !== undefined) {
+    if (!['true', 'false'].includes(recoveryEnabled)) fail('ADMIN_RECOVERY_ENABLED must be true or false');
+    generated = /ADMIN_RECOVERY_ENABLED\s*=/.test(generated)
+      ? generated.replace(/ADMIN_RECOVERY_ENABLED\s*=\s*"[^"]*"/, `ADMIN_RECOVERY_ENABLED = "${recoveryEnabled}"`)
+      : generated.replace(/(\[vars\]\s*)/, `$1\nADMIN_RECOVERY_ENABLED = "${recoveryEnabled}"\n`);
   }
   generated = generated
     .replace('main = "worker/src/index.ts"', 'main = "../src/index.ts"')

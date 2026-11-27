@@ -3,6 +3,7 @@ import { Flex, Card, Text, Heading, Badge, Grid, Box, Button, TextField, Tabs } 
 import { Activity, Bell, Cloud, Code2, Database, Github, Monitor, ShieldCheck, Server, Zap } from 'lucide-react';
 import { formatAppVersion } from '../../utils/version';
 import { useApi } from '../../contexts/AuthContext';
+import { CF_MONITOR_GITHUB_URL } from '../../utils/projectLinks';
 
 interface VersionInfo {
   version: string;
@@ -180,7 +181,7 @@ export default function AdminAbout() {
                     <Badge size="2" variant="soft" color="green">Cloudflare Workers</Badge>
                   </Flex>
                 </Box>
-                <Button variant="soft" onClick={() => openExternal('https://github.com/kadidalax/cf-vps-monitor')} aria-label="GitHub">
+                <Button variant="soft" onClick={() => openExternal(CF_MONITOR_GITHUB_URL)} aria-label="GitHub">
                   <Github size={16} />
                 </Button>
               </Flex>
@@ -226,8 +227,9 @@ export default function AdminAbout() {
               </Flex>
               <Text size="2" color="gray" className="admin-about-position">
                 面向个人和小团队的自托管 VPS 监控面板，优先追求轻量部署、公开状态展示、低维护成本和 Cloudflare 免费生态友好。
-                适合轻量 VPS 探针、公开服务状态页、节点资产管理、基础告警与日常运维巡检。
+                支持统一资产台账、只读发现、配置基线、运维知识库与外部 AI 上下文。实际服务器操作由独立工具执行。
               </Text>
+              <Flex gap="3" wrap="wrap" mt="3"><a href={CF_MONITOR_GITHUB_URL} target="_blank" rel="noopener noreferrer">维护仓库</a><a href="https://github.com/kadidalax/cf-vps-monitor" target="_blank" rel="noopener noreferrer">原始上游</a><a href="/third-party-notices.txt" target="_blank" rel="noopener noreferrer">开源声明与第三方署名</a></Flex>
             </Card>
           </Flex>
         </Tabs.Content>
@@ -242,7 +244,7 @@ export default function AdminAbout() {
                 </Box>
 
                 <Text size="1" className="admin-about-warning">
-                  当前只支持 Fork 仓库通过 GitHub Sync fork 同步更新。一键部署自动创建的仓库不保证包含更新工作流，已不再作为后台更新方式。
+                  更新检查不会自动合并代码或部署。独立维护的仓库应先审阅差异，再通过已有部署流程更新；同步上游时请保留本地扩展与版权声明。
                 </Text>
 
                 <Box>

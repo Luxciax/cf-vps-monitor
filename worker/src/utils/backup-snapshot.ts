@@ -21,6 +21,7 @@ export async function buildBackupSnapshot(database: db.QueryDatabase): Promise<B
     excluded: [...BACKUP_EXCLUDED_MODULES],
     sensitive: true,
     clients: snapshot.clients,
+    ...(snapshot.infrastructure ? { infrastructure: snapshot.infrastructure } : {}),
     settings: buildAdminSettings(snapshot.settings),
     ping_tasks: snapshot.ping_tasks,
     offline_notifications: snapshot.offline_notifications,

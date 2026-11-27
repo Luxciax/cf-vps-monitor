@@ -3,6 +3,10 @@ import test from 'node:test';
 import { isMfaStepUpProtectedRequest } from './mfa-policy.ts';
 
 const protectedRequests = [
+  ['DELETE', '/api/admin/clients/node-1'],
+  ['POST', '/api/admin/account/machine-tokens'],
+  ['POST', '/api/admin/account/machine-tokens/token-id/rotate'],
+  ['POST', '/api/admin/account/machine-tokens/token-id/revoke'],
   ['POST', '/api/admin/account/username'],
   ['POST', '/api/admin/account/chpasswd'],
   ['POST', '/api/admin/clients/node-1/remove'],

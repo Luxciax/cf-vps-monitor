@@ -1,0 +1,18 @@
+CVM / CF VPS Monitor — open-source notices
+
+Project: https://github.com/Luxciax/cf-vps-monitor
+Upstream: https://github.com/kadidalax/cf-vps-monitor
+Copyright (c) 2026 CF VPS Monitor contributors
+Application source: MIT License
+https://github.com/Luxciax/cf-vps-monitor/blob/main/LICENSE
+
+Bundled national flag SVGs: Twemoji
+Copyright 2019 Twitter, Inc and other contributors
+Graphics licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).
+License: https://creativecommons.org/licenses/by/4.0/
+Source artwork: https://github.com/twitter/twemoji/tree/master/assets/svg
+Original Unicode filenames are mapped to ISO region filenames in this project.
+The current maintenance change does not alter the artwork. No endorsement implied.
+
+Complete project and dependency notices:
+https://github.com/Luxciax/cf-vps-monitor/blob/main/docs/THIRD_PARTY_NOTICES.md

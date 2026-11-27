@@ -1,3 +1,4 @@
+import CommandPalette from "../../infrastructure/CommandPalette";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
 import { Flex, Text, Button, IconButton } from "@radix-ui/themes";
@@ -11,6 +12,7 @@ import { formatAppVersion } from "../../utils/version";
 import {
   adminMenuItems,
   isAdminMenuPathActive,
+  getAdminSectionTitle,
 } from "./adminMenu";
 
 export default function AdminLayout() {
@@ -205,9 +207,9 @@ export default function AdminLayout() {
         <Flex className="admin-sidebar-header" align="center" justify="between">
           <Flex direction="column" gap="1" style={{ minWidth: 0 }}>
             <Text size="4" weight="bold" style={{ color: "var(--accent-11)", lineHeight: 1.15 }}>
-              CF VPS Monitor
+              CVM
             </Text>
-            <Text size="1" color="gray">管理后台</Text>
+            <Text size="1" color="gray">个人基础设施中心</Text>
           </Flex>
           {isMobile && (
             <IconButton variant="ghost" size="1" onClick={closeSidebar} aria-label="关闭菜单">
@@ -308,6 +310,7 @@ export default function AdminLayout() {
 
       <main className="admin-main" {...(isMobile && sidebarOpen ? { inert: '' } : {})} style={{ flex: 1, minWidth: 0, padding: "8px 16px 16px", overflowY: "auto" }}>
         <div className="admin-main-content" style={{ maxWidth: 1400, margin: "0 auto", width: "100%" }}>
+          <div className="admin-workspace-bar"><span className="admin-workspace-title">{getAdminSectionTitle(location.pathname)}</span><CommandPalette />
           <div className="admin-top-actions" aria-label="后台快捷操作">
             <IconButton
               className="admin-top-action-button"
@@ -351,6 +354,7 @@ export default function AdminLayout() {
               <Home size={18} />
             </IconButton>
           </div>
+          </div>
           {logoutError && <Flex role="alert" direction="column" gap="2" mb="3" style={{ paddingTop: 44 }}>
             <Text size="2" color="red">{logoutError}</Text>
             <Button variant="soft" color="red" disabled={loggingOut} onClick={() => void handleLogout()} style={{ alignSelf: 'flex-start' }}>重试退出</Button>
@@ -360,16 +364,17 @@ export default function AdminLayout() {
       </main>
 
       <style>{`
+        .admin-workspace-bar { display: flex; align-items: center; gap: 16px; min-height: 62px; border-bottom: 1px solid var(--gray-5); margin-bottom: 16px; }
+        .admin-workspace-title { font-size: 12px; color: var(--gray-11); margin-right: auto; }
+        @media (max-width: 768px) { .admin-workspace-bar { padding-left: 44px; gap: 8px; } .admin-workspace-title { display: none; } .admin-workspace-bar .infra-command-trigger { margin-right: auto; } }
         .admin-sidebar {
-          width: 180px;
-          min-width: 180px;
+          width: 210px;
+          min-width: 210px;
           height: 100vh;
           position: sticky;
           top: 0;
           border-right: 1px solid var(--monitor-border);
-          background: var(--monitor-panel);
-          -webkit-backdrop-filter: blur(18px) saturate(150%);
-          backdrop-filter: blur(18px) saturate(150%);
+          background: var(--color-panel-solid);
           overflow-y: auto;
           display: flex;
           flex-direction: column;
@@ -402,15 +407,13 @@ export default function AdminLayout() {
           min-width: 0;
           overflow-y: auto;
           height: 100vh;
-          background: var(--monitor-page-bg);
+          background: var(--gray-2);
         }
         .admin-main-content {
           position: relative;
         }
         .admin-top-actions {
-          position: absolute;
-          top: 0;
-          right: 0;
+          position: static;
           z-index: 30;
           display: flex;
           justify-content: flex-end;
@@ -419,7 +422,7 @@ export default function AdminLayout() {
           min-height: 40px;
           margin: 0;
           padding: 0;
-          pointer-events: none;
+          pointer-events: auto;
         }
         .admin-top-action-button {
           width: 38px !important;
@@ -457,8 +460,8 @@ export default function AdminLayout() {
             top: 0;
             left: 0;
             bottom: 0;
-            width: 135px;
-            min-width: 135px;
+            width: 240px;
+            min-width: 240px;
             transform: translateX(-100%);
             transition: transform 0.3s ease;
             z-index: 45;
@@ -472,12 +475,12 @@ export default function AdminLayout() {
             padding: 12px 16px 16px !important;
           }
           .admin-main-content {
-            padding-top: 46px;
+            padding-top: 0;
           }
           .admin-top-actions {
             min-height: 40px;
             margin: 0;
-            padding-left: 52px;
+            padding-left: 0;
           }
           .admin-top-action-button {
             width: 38px !important;

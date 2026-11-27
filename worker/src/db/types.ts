@@ -1,3 +1,4 @@
+import type { WebsiteCheckConfig, WebsiteCheckDetails } from '../utils/website-check-config.ts';
 export interface Client {
   uuid: string;
   token: string;
@@ -242,6 +243,10 @@ export type WebsiteAgentProbeMode = 'off' | 'selected' | 'country_auto';
 export type WebsiteCheckSourceType = 'worker' | 'agent';
 
 export interface WebsiteMonitor {
+  tls_expires_at?: string | null;
+  tls_observed_at?: string | null;
+  tls_notification_expires_at?: string | null;
+  check_config?: WebsiteCheckConfig;
   id: number;
   config_revision: string;
   name: string;
@@ -287,6 +292,9 @@ export interface WebsiteMonitor {
 
 export type WebsiteMonitorInput = Omit<
   WebsiteMonitor,
+  | 'tls_expires_at'
+  | 'tls_observed_at'
+  | 'tls_notification_expires_at'
   | 'id'
   | 'config_revision'
   | 'sort_order'
@@ -306,6 +314,7 @@ export type WebsiteMonitorInput = Omit<
 >;
 
 export interface WebsiteCheck {
+  details?: WebsiteCheckDetails;
   id: number;
   monitor_id: number;
   config_revision: string | null;
@@ -331,6 +340,7 @@ export type WebsiteNotificationExpectation = Pick<
 >;
 
 export interface BackupConfigurationSnapshot {
+  infrastructure?: import('../infra/backup').InventoryBackup;
   settings: Record<string, string>;
   clients: Client[];
   ping_tasks: PingTask[];
@@ -341,6 +351,9 @@ export interface BackupConfigurationSnapshot {
 }
 
 export interface PublicWebsiteMonitor {
+  /** Only expiry/timing evidence; certificate subjects and upstream addresses remain private. */
+  tls_expires_at?: string | null;
+  tls_observed_at?: string | null;
   id: number;
   name: string;
   /** 勾选「对游客隐藏地址」时为 null——游客侧只有名称与状态。 */

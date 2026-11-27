@@ -15,6 +15,7 @@ const EXACT_PROTECTED_PATHS = new Set([
 const CLIENT_SECRET_PATH = /^\/api\/admin\/clients\/[^/]+\/(?:remove|token(?:\/install|\/rotate)?)$/;
 
 export function isMfaStepUpProtectedRequest(method: string, pathname: string): boolean {
+  if (method.toUpperCase() === 'DELETE' && /^\/api\/admin\/clients\/[^/]+$/.test(pathname)) return true;
   if (method.toUpperCase() !== 'POST') return false;
-  return EXACT_PROTECTED_PATHS.has(pathname) || CLIENT_SECRET_PATH.test(pathname);
+  return EXACT_PROTECTED_PATHS.has(pathname) || CLIENT_SECRET_PATH.test(pathname) || /^\/api\/admin\/account\/machine-tokens(?:\/|$)/.test(pathname);
 }

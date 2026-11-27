@@ -1,0 +1,197 @@
+import type { MachineApiEndpoint } from "../routes/machine-api";
+
+type Row = [
+  MachineApiEndpoint["method"],
+  string,
+  MachineApiEndpoint["scope"],
+  string,
+];
+const rows: Row[] = [
+  [
+    "GET",
+    "/infrastructure/summary",
+    "assets:read",
+    "Infrastructure inventory counts",
+  ],
+  [
+    "POST",
+    "/infrastructure/cleanup",
+    "assets:write",
+    "Bounded inventory history retention cleanup",
+  ],
+  ["GET", "/assets", "assets:read", "Search and filter inventory"],
+  ["POST", "/assets", "assets:write", "Create asset"],
+  ["GET", "/assets/:id", "assets:read", "Get stable asset identity"],
+  [
+    "PATCH",
+    "/assets/:id",
+    "assets:write",
+    "Update manually maintained asset fields",
+  ],
+  [
+    "POST",
+    "/assets/import",
+    "assets:write",
+    "Import inventory with stable identity deduplication",
+  ],
+  [
+    "POST",
+    "/assets/batch",
+    "assets:write",
+    "Archive or tag selected assets atomically",
+  ],
+  [
+    "POST",
+    "/assets/:id/merge",
+    "assets:write",
+    "Merge duplicate inventory without deleting history",
+  ],
+  [
+    "GET",
+    "/assets/:id/context",
+    "assets:read",
+    "Bounded context filtered by granted section scopes",
+  ],
+  [
+    "GET",
+    "/assets/:id/topology",
+    "assets:read",
+    "Traverse upstream dependencies or downstream impact",
+  ],
+  [
+    "GET",
+    "/assets/:id/monitors",
+    "monitors:read",
+    "Get linked monitoring tasks",
+  ],
+  [
+    "POST",
+    "/assets/:id/monitors",
+    "assets:write",
+    "Link an existing monitor to an asset",
+  ],
+  ["GET", "/relationships", "assets:read", "List typed asset relationships"],
+  ["POST", "/relationships", "assets:write", "Add asset relationship"],
+  ["DELETE", "/relationships/:id", "assets:write", "Remove relationship"],
+  ["GET", "/discovery/candidates", "discovery:read", "Read discovery inbox"],
+  [
+    "GET",
+    "/discovery/runs",
+    "discovery:read",
+    "Read collection completeness and errors",
+  ],
+  [
+    "POST",
+    "/discovery/reports",
+    "discovery:write",
+    "Submit a bounded structured discovery report",
+  ],
+  [
+    "POST",
+    "/discovery/candidates/:id/resolve",
+    "discovery:write",
+    "Import, merge or ignore a candidate",
+  ],
+  [
+    "GET",
+    "/configuration/snapshots",
+    "config:read",
+    "List configuration evidence",
+  ],
+  [
+    "POST",
+    "/configuration/snapshots",
+    "config:write",
+    "Submit externally reported configuration evidence",
+  ],
+  [
+    "GET",
+    "/changes",
+    "changes:read",
+    "Filter changes and observed versus reported outcomes",
+  ],
+  [
+    "POST",
+    "/operations",
+    "changes:write",
+    "Record external operations as unverified claims",
+  ],
+  ["GET", "/documents", "knowledge:read", "Full-text document search"],
+  ["POST", "/documents", "knowledge:write", "Create a versioned document"],
+  [
+    "GET",
+    "/documents/:id",
+    "knowledge:read",
+    "Read untrusted Markdown and metadata",
+  ],
+  [
+    "PATCH",
+    "/documents/:id",
+    "knowledge:write",
+    "Update with optimistic version check",
+  ],
+  [
+    "GET",
+    "/documents/:id/versions",
+    "knowledge:read",
+    "Read document version history",
+  ],
+  [
+    "POST",
+    "/documents/:id/restore",
+    "knowledge:write",
+    "Restore a document version as a new revision",
+  ],
+  ["GET", "/documents/:id/export", "knowledge:read", "Export Markdown"],
+  [
+    "GET",
+    "/baselines",
+    "baselines:read",
+    "List versioned configuration baselines",
+  ],
+  ["POST", "/baselines", "baselines:write", "Create a baseline"],
+  ["GET", "/baselines/:id", "baselines:read", "Read rules and exceptions"],
+  [
+    "PATCH",
+    "/baselines/:id",
+    "baselines:write",
+    "Update a baseline with version check",
+  ],
+  [
+    "GET",
+    "/baselines/:id/versions",
+    "baselines:read",
+    "Read baseline versions",
+  ],
+  [
+    "POST",
+    "/baselines/:id/evaluate",
+    "baselines:write",
+    "Evaluate a snapshot without executing remediation",
+  ],
+  [
+    "GET",
+    "/search",
+    "assets:read",
+    "Global scope-filtered inventory and document search",
+  ],
+  [
+    "GET",
+    "/websites/:id/statistics",
+    "monitors:read",
+    "Time-weighted SLA, coverage, incidents and latency percentiles",
+  ],
+];
+export const INFRA_API_ENDPOINTS: MachineApiEndpoint[] = rows.map(
+  ([method, path, scope, summary]) => ({
+    method,
+    path,
+    scope,
+    summary,
+    group: path.split("/")[1],
+    canonical: true,
+    ...(["POST", "PATCH"].includes(method)
+      ? { requestBody: "json" as const }
+      : {}),
+  }),
+);
