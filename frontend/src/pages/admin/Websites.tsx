@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import MonitorAssetLink from '../../infrastructure/MonitorAssetLink';
 import {
   DndContext,
   type DragEndEvent,
@@ -38,6 +40,10 @@ import {
 import { ExternalLink, Eye, EyeOff, Globe2, Grip, Pencil, Plus, Power, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import Loading from '../../components/Loading';
+import WebsiteCheckPolicy, { type WebsiteCheckPolicyValue } from '../../components/WebsiteCheckPolicy';
+import WebsiteStatistics from '../../components/WebsiteStatistics';
+import WebsiteCertificateStatus from '../../components/WebsiteCertificateStatus';
+import WebsiteProbeEvidence, { type WebsiteProbeResult } from '../../components/WebsiteProbeEvidence';
 import WebsiteHeartbeatBar from '../../components/WebsiteHeartbeatBar';
 import { useApi } from '../../contexts/AuthContext';
 import { notifyWebsiteMonitorsUpdated, subscribeWebsiteMonitorsUpdated, type WebsiteMonitorsUpdateDetail } from '../../utils/websiteMonitorEvents';
@@ -53,6 +59,9 @@ const DEFAULT_EXPECTED_STATUS_MIN = 200;
 const DEFAULT_EXPECTED_STATUS_MAX = 399;
 
 interface WebsiteMonitor {
+  tls_expires_at?: string | null;
+  tls_observed_at?: string | null;
+  check_config?: WebsiteCheckPolicyValue;
   id: number;
   name: string;
   url: string;
@@ -87,11 +96,7 @@ interface WebsiteMonitor {
   last_effective_reason: string | null;
 }
 
-interface WebsiteCheck {
-  checked_at: string;
-  ok: boolean;
-  latency_ms: number | null;
-}
+type WebsiteCheck = WebsiteProbeResult;
 
 interface ClientLite {
   uuid: string;
@@ -100,6 +105,7 @@ interface ClientLite {
 }
 
 const emptyForm = {
+  check_config: {} as WebsiteCheckPolicyValue,
   name: '',
   url: 'https://',
   method: 'GET' as WebsiteMethod,
@@ -359,6 +365,8 @@ function SortableWebsiteCard({ monitor, selected, dragDisabled, onSelect, onChec
 }
 
 export default function AdminWebsites() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedMonitor = searchParams.get("monitor");
   const apiFetch = useApi();
   const monitorsLoadRef = useRef<Promise<void> | null>(null);
   const monitorsMountedRef = useRef(false);
@@ -367,6 +375,7 @@ export default function AdminWebsites() {
   const monitorUpdatesRef = useRef<Array<(current: WebsiteMonitor[]) => WebsiteMonitor[]> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [policyValid, setPolicyValid] = useState(true);
   const [monitors, setMonitors] = useState<WebsiteMonitor[]>([]);
   const updateMonitors = (update: WebsiteMonitor[] | ((current: WebsiteMonitor[]) => WebsiteMonitor[])) => {
     if (!monitorsMountedRef.current) return;
@@ -541,7 +550,7 @@ export default function AdminWebsites() {
     return () => media.removeEventListener('change', updateMobile);
   }, []);
 
-  const update = (key: keyof typeof emptyForm, value: string | number | boolean | string[]) => {
+  const update = <K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -558,6 +567,9 @@ export default function AdminWebsites() {
     setForm((prev) => ({
       ...prev,
       method,
+      check_config: method === 'TCP' && prev.check_config.kind !== 'tcp' || method !== 'TCP' && prev.check_config.kind === 'tcp'
+        ? {kind: method === 'TCP' ? 'tcp' : 'http', tls_warning_days: prev.check_config.tls_warning_days, maintenance: prev.check_config.maintenance, silenced_until: prev.check_config.silenced_until}
+        : prev.check_config,
       url: method === 'TCP' && prev.url === 'https://' ? 'tcp://' : method !== 'TCP' && prev.url === 'tcp://' ? 'https://' : prev.url,
     }));
   };
@@ -568,7 +580,9 @@ export default function AdminWebsites() {
     setChecks([]);
     ensureClients().catch((error: unknown) => toast.error(error instanceof Error ? error.message : '服务列表加载失败'));
     setEditMonitor(monitor);
+    setPolicyValid(true);
     setForm(monitor ? {
+      check_config: monitor.check_config || {},
       name: monitor.name,
       url: monitor.url,
       method: monitor.method,
@@ -597,7 +611,15 @@ export default function AdminWebsites() {
     setEditOpen(true);
   };
 
+  useEffect(() => {
+    if (!requestedMonitor || loading) return;
+    const target = monitors.find(monitor => String(monitor.id) === requestedMonitor);
+    if (target) openEdit(target);
+    setSearchParams(current => {const next = new URLSearchParams(current);next.delete("monitor");return next;}, {replace: true});
+  }, [requestedMonitor, loading, monitors]);
+
   const save = async () => {
+    if (!policyValid) { toast.error("请修正 JSON 内容期望值"); return; }
     const numericValues = form.method === 'TCP'
       ? [form.interval_sec, form.timeout_sec, form.grace_period_sec]
       : [form.expected_status_min, form.expected_status_max, form.interval_sec, form.timeout_sec, form.grace_period_sec];
@@ -948,6 +970,7 @@ export default function AdminWebsites() {
           <Dialog.Title>{editMonitor ? '编辑监控' : '添加监控'}</Dialog.Title>
           <div className="admin-website-dialog-scroll">
           <Flex direction="column" gap="3">
+            {editOpen && editMonitor && <div><MonitorAssetLink monitorType="website" monitorId={editMonitor.id} /></div>}
             <Grid className="admin-website-compact-grid" columns={{ initial: '1', sm: '2' }} gap="3">
               <label>
                 <Text size="2" weight="bold">名称</Text>
@@ -955,11 +978,11 @@ export default function AdminWebsites() {
               </label>
               <label>
                 <Text size="2" weight="bold">检测方式</Text>
-                <Select.Root value={form.method} onValueChange={(value) => updateMethod(value as WebsiteMethod)}>
+                <Select.Root value={form.method} onValueChange={(value) => { update('check_config', { ...form.check_config, kind: value === 'TCP' ? 'tcp' : 'http' }); updateMethod(value as WebsiteMethod); }}>
                   <Select.Trigger style={{ width: '100%' }} />
                   <Select.Content>
                     <Select.Item value="GET">HTTP GET</Select.Item>
-                    <Select.Item value="HEAD">HTTP HEAD</Select.Item>
+                    <Select.Item value="HEAD" disabled={!!form.check_config.keyword || !!form.check_config.json_path}>HTTP HEAD</Select.Item>
                     <Select.Item value="TCP">TCP 端口</Select.Item>
                   </Select.Content>
                 </Select.Root>
@@ -1110,11 +1133,12 @@ export default function AdminWebsites() {
                 )}
               </Flex>
             )}
-            {editMonitor && <WebsiteHeartbeatBar checks={checks} max={60} />}
+            <WebsiteCheckPolicy value={form.check_config} method={form.method} onChange={value => update('check_config', value)} onMethodChange={updateMethod} onValidChange={setPolicyValid} />
+            {editMonitor && <><WebsiteHeartbeatBar checks={checks} max={60} /><WebsiteCertificateStatus expiresAt={editMonitor.tls_expires_at} observedAt={editMonitor.tls_observed_at} warningDays={form.check_config.tls_warning_days} /><WebsiteProbeEvidence checks={checks} /><WebsiteStatistics monitorId={editMonitor.id} admin /></>}
             <Flex gap="2" justify="end" wrap="wrap">
               <Flex gap="2">
                 <Button variant="soft" color="gray" onClick={() => changeEditOpen(false)}>取消</Button>
-                <Button onClick={save} disabled={saving}><Save size={16} />{saving ? '保存中' : '保存'}</Button>
+                <Button onClick={save} disabled={saving || !policyValid}><Save size={16} />{saving ? '保存中' : '保存'}</Button>
               </Flex>
             </Flex>
           </Flex>

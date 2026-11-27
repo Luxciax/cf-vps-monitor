@@ -1,3 +1,4 @@
+import { websiteStatistics } from '../utils/website-statistics-service';
 /**
  * 公开 API 路由 - 无需认证
  */
@@ -7,7 +8,7 @@ import type { Context } from 'hono';
 import type { Bindings, Variables } from '../index';
 import * as db from '../db/queries';
 import { getDatabase } from '../db/provider';
-import { resolveSupabaseApiKey } from '../db/supabase-api/client';
+import { adminRecoveryEnabled, authorizeAdminRecovery } from '../auth/admin-recovery';
 import { invalidateAdminSessionCache, validateAdminSession } from '../auth/admin-session';
 import { AuthConfigurationError, generateToken, verifyAdminToken } from '../auth/jwt';
 import { decryptTotpSecret, hashRecoveryCode } from '../auth/mfa';
@@ -61,7 +62,6 @@ const PUBLIC_METADATA_CACHE_MAX_ENTRIES = PUBLIC_HISTORY_CACHE_MAX_ENTRIES;
 const ADMIN_SESSION_EDGE_CACHE_SECONDS = 30;
 const LOGOUT_CLEAR_SITE_DATA_HEADER = '"cache"';
 const DUMMY_ADMIN_PASSWORD_HASH = 'pbkdf2_sha256$10000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
-const MAX_ADMIN_RECOVERY_KEY_LENGTH = 8192;
 const MAX_ADMIN_RECOVERY_USERNAME_BYTES = 64;
 const SITE_LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
@@ -758,25 +758,6 @@ function normalizeLoginUsername(username: string): string {
   return username.trim().toLowerCase().slice(0, MAX_LOGIN_USERNAME_LENGTH);
 }
 
-async function sha256Bytes(value: string): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
-}
-
-async function timingSafeEqualString(actual: string | undefined, expected: string | undefined): Promise<boolean> {
-  if (!actual || !expected) return false;
-  const [actualHash, expectedHash] = await Promise.all([sha256Bytes(actual), sha256Bytes(expected)]);
-  let diff = actual.length === expected.length ? 0 : 1;
-  for (let index = 0; index < expectedHash.length; index += 1) {
-    diff |= actualHash[index] ^ expectedHash[index];
-  }
-  return diff === 0;
-}
-
-function readRecoverySecretKey(body: Record<string, unknown>): string {
-  const value = body.supabase_secret_key ?? body.supabase_service_role_key ?? body.service_role_key;
-  return typeof value === 'string' ? value.trim() : '';
-}
-
 function readRecoveryUsername(body: Record<string, unknown>): string {
   return typeof body.username === 'string' ? body.username.trim() : '';
 }
@@ -976,11 +957,10 @@ export async function auditLoginFailure(
 publicRoutes.get('/admin/recovery/status', async (c) => {
   const limited = await guardAdminRecovery(c);
   if (limited) return limited;
+  const enabled = adminRecoveryEnabled(c.env);
+  if (!enabled) return c.json({ enabled: false, recoverable: false });
   const userCount = await db.countUsers(getDatabase(c.env));
-  return c.json({
-    admin_present: userCount > 0,
-    recoverable: userCount <= 1,
-  });
+  return c.json({ enabled, admin_present: userCount > 0, recoverable: userCount <= 1 });
 });
 
 publicRoutes.post('/admin/recovery', async (c) => {
@@ -990,7 +970,7 @@ publicRoutes.post('/admin/recovery', async (c) => {
   const parsed = await readPublicJsonObject(c);
   if ('response' in parsed) return parsed.response;
 
-  const serviceRoleKey = readRecoverySecretKey(parsed.body);
+  if (!adminRecoveryEnabled(c.env)) return c.json({ code: 'RECOVERY_DISABLED', error: '管理员恢复未启用' }, 403);
   const username = readRecoveryUsername(parsed.body);
   const password = readRecoveryPassword(parsed.body);
 
@@ -999,14 +979,9 @@ publicRoutes.post('/admin/recovery', async (c) => {
   const passwordError = validateAdminPasswordStrength(password, username);
   if (passwordError) return c.json({ error: passwordError }, 400);
 
-  // Both initial ownership and recovery require the deployment secret. A stale
-  // empty-account observation must never grant authorization to reset an owner.
-  if (
-    !serviceRoleKey ||
-    serviceRoleKey.length > MAX_ADMIN_RECOVERY_KEY_LENGTH ||
-    !await timingSafeEqualString(serviceRoleKey, resolveSupabaseApiKey(c.env))
-  ) {
-    return c.json({ error: 'Supabase Secret key 无效' }, 403);
+  if (!await authorizeAdminRecovery(c.env, parsed.body.recovery_token)) {
+    runLoginBackground(c, db.insertAuditLog(getDatabase(c.env), 'anonymous', 'admin_recovery_denied', JSON.stringify({ ip: getClientIp(c) }), 'warning'));
+    return c.json({ code: 'RECOVERY_UNAUTHORIZED', error: '管理员恢复凭据无效' }, 403);
   }
   const database = getDatabase(c.env);
   const userCount = await db.countUsers(database);
@@ -1036,7 +1011,7 @@ publicRoutes.post('/admin/recovery', async (c) => {
       database,
       username,
       'admin_recovery',
-      userCount === 0 ? '首次创建管理员账号' : '通过 Supabase Secret key 重置管理员账号',
+      userCount === 0 ? '通过独立恢复凭据首次创建管理员账号' : '通过独立恢复凭据重置管理员账号并撤销旧会话/MFA',
       'warning',
     ),
   );
@@ -1647,6 +1622,24 @@ publicRoutes.get('/websites/:id/checks', async (c) => {
     latency_ms: check.latency_ms,
   }));
   return includeHidden ? privateJsonResponse(checks) : setPublicHistoryCache(c, cacheKey, checks);
+});
+
+publicRoutes.get('/websites/:id/statistics', async (c) => {
+  const id=Number(c.req.param('id'));
+  if(!Number.isSafeInteger(id)||id<1)return c.json({error:'Not Found'},404);
+  const limited=await guardPublicHistory(c,'website-statistics');if(limited)return limited;
+  const database=getDatabase(c.env);
+  const visible=await db.getPublicWebsiteMonitorById(database,id,1,false);
+  if(!visible)return c.json({error:'Not Found'},404);
+  const until=c.req.query('until')||new Date().toISOString();
+  if(!Number.isFinite(Date.parse(until)))return c.json({code:'VALIDATION_ERROR',error:'Invalid until timestamp'},400);
+  const since=c.req.query('since')||new Date(Date.parse(until)-86400000).toISOString();
+  if(!Number.isFinite(Date.parse(since))||!Number.isFinite(Date.parse(until))||Date.parse(until)<=Date.parse(since)||Date.parse(until)-Date.parse(since)>30*86400000)return c.json({code:'VALIDATION_ERROR',error:'Use a positive time window of at most 30 days'},400);
+  const monitor=await db.getWebsiteMonitor(database,id);
+  if(!monitor||monitor.hidden)return c.json({error:'Not Found'},404);
+  const stats=await websiteStatistics(database,monitor,since,until);
+  c.header('Cache-Control','no-store');
+  return c.json(stats);
 });
 
 publicRoutes.get('/websites/:id', async (c) => {

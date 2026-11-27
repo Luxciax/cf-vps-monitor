@@ -5,6 +5,8 @@ import * as sba from './db/supabase-api/client.ts';
 import * as dispatch from './utils/notification-dispatch.ts';
 import * as offline from './utils/offline-notification.ts';
 import * as websites from './utils/website-monitor.ts';
+import * as websiteChecks from './utils/website-check-config.ts';
+import * as certificates from './utils/certificate-notifications.ts';
 import * as templates from './utils/notification-templates.ts';
 import { buildAdminSettings } from './settings/schema.ts';
 import { createTestDatabase, rpc } from '../../scripts/test-support/postgres.mjs';
@@ -80,7 +82,7 @@ async function harness({ slow = false, redirects = false, offlineCount = 0, webh
     await database.exec("insert into website_monitors(name,url,interval_sec,timeout_sec,grace_period_sec,agent_probe_mode) select 'Website '||n,'https://website.example.com/'||n,86400,30,86400,'off' from generate_series(1,50) n;");
   }
   const functions = await loadTypeScriptFunctions(new URL('./index.ts', import.meta.url), null, {
-    ...dispatch, ...offline, ...websites, ...templates, ...budgets,
+    ...dispatch, ...offline, ...websites, ...websiteChecks, ...certificates, ...templates, ...budgets,
     ...(budgets.ScheduledBudget ? { ScheduledBudget: class extends budgets.ScheduledBudget { constructor() { super({ now: () => clock }); } } } : {}),
     Date: ClockDate, db: queries, getDatabase: () => connection, buildAdminSettings,
     bestEffortRecordHealthEvent: health, errorDetail: error => String(error),

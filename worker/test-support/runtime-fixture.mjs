@@ -7,6 +7,8 @@ import { createTestDatabase } from '../../scripts/test-support/postgres.mjs';
 const root = new URL('../../', import.meta.url);
 export const runtimeSecrets = {
   JWT_SECRET: 'synthetic-runtime-jwt-secret-at-least-32-bytes',
+  ADMIN_RECOVERY_ENABLED: 'true',
+  ADMIN_RECOVERY_TOKEN: 'synthetic-runtime-independent-recovery-token-32-bytes',
   SUPABASE_SECRET_KEY: 'sb_secret_synthetic_runtime_only',
   SUPABASE_URL: 'https://synthetic-supabase.invalid',
 };

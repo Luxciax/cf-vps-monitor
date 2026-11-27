@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
 const agent = join(repo, 'agent');
-const cachedGo = 'C:/Users/Administrator/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.8.windows-amd64/bin/go.exe';
-const go = existsSync(cachedGo) ? cachedGo : 'go';
+const go = 'go';
 
 test('R-A08 real ICMP execution uses each platform and family command contract', t => {
   const parent = join(repo, 'worker', '.tmp', 'reaudit-agent-ping');

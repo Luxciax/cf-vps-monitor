@@ -18,7 +18,7 @@ function normalizeSql(sql) {
 
 const migrations = readdirSync(migrationsDir)
   .filter((name) => name.endsWith('.sql'))
-  .sort()
+  .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
   .map((fileName) => {
     const version = fileName.replace(/\.sql$/i, '');
     const sql = normalizeSql(readFileSync(join(migrationsDir, fileName), 'utf8'));

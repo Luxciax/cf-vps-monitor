@@ -1,3 +1,6 @@
+import { infra } from './infra/service';
+import { isWebsiteInMaintenance } from './utils/website-check-config';
+import { certificateReminderDue, buildCertificateExpiryNotification, markCertificateNotified } from './utils/certificate-notifications';
 /**
  * CF VPS Monitor - Cloudflare Worker 监控系统
  * 使用 Hono 框架 + Supabase HTTP API/RPC + Durable Objects
@@ -16,6 +19,7 @@ import { clientRoutes } from './routes/client';
 import { wsRoutes } from './routes/websocket';
 import { setupRoutes } from './routes/setup';
 import { machineApiRoutes } from './routes/machine-api';
+import { infrastructureRoutes } from './routes/infrastructure';
 import * as db from './db/queries';
 import { DatabaseConfigurationError, getDatabase, withDatabase } from './db/provider';
 import { validateAdminSession } from './auth/admin-session';
@@ -23,7 +27,8 @@ import { AuthConfigurationError, verifyAdminToken, type AdminJwtPayload } from '
 import { isMfaStepUpProtectedRequest } from './auth/mfa-policy';
 import { verifyMfaToken } from './auth/mfa-token';
 import { getAdminSessionToken, getMfaStepUpToken, verifyAdminCsrfToken } from './auth/session';
-import { authorizeAdminApiRequest } from './auth/admin-api-token';
+import { authorizeAdminApiRequest, type AdminApiScope } from './auth/admin-api-token';
+import { lookupMachineToken, machineTokenAdminRoutes } from './auth/machine-tokens';
 import { buildAdminSettings } from './settings/schema';
 import { bestEffortRecordHealthEvent, errorDetail, type StoredHealthComponent } from './utils/observability';
 import { NOTIFICATION_DISPATCH_SETTING_KEYS, deliverNotification, dispatchNotification } from './utils/notification-dispatch';
@@ -64,6 +69,8 @@ type RuntimeBindings = {
   JWT_SECRET?: string;
   ADMIN_API_TOKEN?: string;
   ADMIN_API_TOKEN_SCOPES?: string;
+  ADMIN_RECOVERY_ENABLED?: string;
+  ADMIN_RECOVERY_TOKEN?: string;
   SETUP_DIAGNOSTICS_ENABLED?: string;
   CURRENT_GIT_COMMIT?: string;
 };
@@ -79,6 +86,7 @@ export type Variables = {
   clientHidden?: boolean;
   clientRecord?: MonitorClient;
   agentTokenKey?: string;
+  machineScopes?: AdminApiScope[];
 };
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -337,12 +345,19 @@ app.route('/api', wsRoutes);
 // Machine API for CLI/Codex/automation. This deliberately reuses the same
 // privileged handlers as the browser admin UI instead of duplicating business logic.
 app.use('/api/v1/*', async (c, next): Promise<Response | undefined> => {
-  const auth = await authorizeAdminApiRequest({
-    authorization: c.req.header('Authorization'),
-    method: c.req.method,
-    pathname: c.req.path,
-    env: c.env,
-  });
+  let auth;
+  try {
+    auth = await authorizeAdminApiRequest({
+      authorization: c.req.header('Authorization'),
+      method: c.req.method,
+      pathname: c.req.path,
+      env: c.env,
+      lookupToken: digest => lookupMachineToken(c.env, digest),
+    });
+  } catch {
+    c.header('Retry-After', '30');
+    return c.json({ code: 'API_TOKEN_STORE_UNAVAILABLE', error: 'Machine token authentication storage is unavailable; verify database connectivity and migrations' }, 503);
+  }
 
   if (!auth.ok) {
     if (auth.reason === 'missing' || auth.reason === 'invalid') {
@@ -372,6 +387,7 @@ app.use('/api/v1/*', async (c, next): Promise<Response | undefined> => {
 
   c.set('userId', 'api-token');
   c.set('username', auth.principal);
+  c.set('machineScopes', auth.scopes);
   c.header('X-CF-VPS-Monitor-Auth', 'api-token');
   c.header('X-CF-VPS-Monitor-API-Version', 'v1');
   c.header('X-CF-VPS-Monitor-API-Scopes', auth.scopes.join(','));
@@ -382,6 +398,7 @@ app.use('/api/v1/*', async (c, next): Promise<Response | undefined> => {
 
 app.route('/api/v1', machineApiRoutes);
 app.route('/api/v1/themes', adminThemeRoutes);
+app.route('/api/v1', infrastructureRoutes);
 app.route('/api/v1', adminRoutes);
 
 app.post('/api/v1/cron/run', async (c) => {
@@ -421,26 +438,15 @@ app.use('/api/admin/*', async (c, next): Promise<Response | undefined> => {
   }
 
   const safeMethod = isSafeMethod(c.req.method);
-  if (await getAdminSessionEdgeCache(payload)) {
+  if (safeMethod && await getAdminSessionEdgeCache(payload)) {
     c.set('userId', payload.userId);
     c.set('username', payload.username);
-    if (!safeMethod && !verifyAdminCsrfToken(c)) {
-      return c.json({ error: 'CSRF token 无效，请刷新页面后重试' }, 403);
-    }
-    if (!safeMethod) {
-      return withDatabase(c.env, async (database) => {
-        const stepUpResponse = await requireMfaStepUp(c, database, payload);
-        if (stepUpResponse) return stepUpResponse;
-        await next();
-        return undefined;
-      });
-    }
     await next();
     return undefined;
   }
 
   return withDatabase(c.env, async (database) => {
-    const sessionUser = await validateAdminSession(database, payload);
+    const sessionUser = await validateAdminSession(database, payload, !safeMethod);
     if (!sessionUser) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
@@ -466,7 +472,9 @@ app.use('/api/admin/*', async (c, next): Promise<Response | undefined> => {
   });
 });
 
+app.route('/api/admin/account/machine-tokens', machineTokenAdminRoutes);
 app.route('/api/admin/themes', adminThemeRoutes);
+app.route('/api/admin', infrastructureRoutes);
 app.route('/api/admin', adminRoutes);
 
 // 管理员手动触发维护任务，用于本地开发和部署后自检。
@@ -633,7 +641,7 @@ async function sendNotification(
 }
 
 async function runRecordCleanup(context: ScheduledRunContext, now: Date): Promise<void> {
-  context.budget?.ensureCanStart(8);
+  context.budget?.ensureCanStart(9);
   const settings = await context.getSettings();
   const lastCleanupAt = Date.parse(settings[RECORD_CLEANUP_LAST_RUN_KEY] || '');
   if (Number.isFinite(lastCleanupAt) && now.getTime() - lastCleanupAt < RECORD_CLEANUP_INTERVAL_MS) {
@@ -654,7 +662,8 @@ async function runRecordCleanup(context: ScheduledRunContext, now: Date): Promis
   const deliveryDeleted = await db.cleanupNotificationDeliveryState(context.database, now.toISOString(), {
     batchSize: 1000, maxBatches: 1,
   });
-  const hasMore = recordDeleted.has_more || websiteDeleted.has_more || pingDeleted.has_more || auditDeleted.has_more || deliveryDeleted.has_more;
+  const inventoryCleanup = await infra<{has_more:boolean}>(context.database.env,'cleanup',{},'retention');
+  const hasMore = inventoryCleanup.has_more || recordDeleted.has_more || websiteDeleted.has_more || pingDeleted.has_more || auditDeleted.has_more || deliveryDeleted.has_more;
   const deleted = {
     records: recordDeleted.records,
     gpu_records: recordDeleted.gpu_records,
@@ -991,9 +1000,19 @@ async function runLoadCheck(context: ScheduledRunContext, now: Date): Promise<vo
 async function runWebsiteMonitorChecks(context: ScheduledRunContext, now: Date): Promise<void> {
   const monitors = await db.listDueWebsiteMonitors(context.database, now.toISOString(), 50);
   for await (const monitor of scheduledItems(context, 'websites', monitors, monitor => String(monitor.id))) {
+    if (isWebsiteInMaintenance(monitor.check_config, now)) continue;
     const check = await checkWebsiteMonitorHttp(monitor);
     const updated = await db.recordWebsiteCheck(context.database, check);
     if (!updated) continue;
+
+    if (certificateReminderDue(updated, now)) {
+      context.budget?.ensureCanStart(8);
+      const sent = await sendNotification(context, buildCertificateExpiryNotification(updated, now), {
+        key: `website-certificate:${updated.id}`,
+        eventId: `certificate:${updated.config_revision}:${updated.tls_expires_at}`,
+      }, now, () => markCertificateNotified(context.database.env, updated));
+      if (sent) await db.insertAuditLog(context.database, 'system', 'website_certificate_expiry', `TLS 证书到期提醒已发送: ${updated.name}`);
+    }
 
     if (shouldNotifyWebsiteDown(updated, now)) {
       const downSince = updated.down_since ? new Date(updated.down_since).getTime() : now.getTime();
@@ -1011,7 +1030,7 @@ async function runWebsiteMonitorChecks(context: ScheduledRunContext, now: Date):
       await db.insertAuditLog(context.database, 'system', 'website_down', `${sent ? '已发送' : '已记录'}网站告警: ${updated.name}`);
     }
 
-    if (shouldNotifyWebsiteRecovery(updated)) {
+    if (shouldNotifyWebsiteRecovery(updated, now)) {
       const downSince = monitor.down_since ? new Date(monitor.down_since).getTime() : now.getTime();
       const downMinutes = Math.max(0, Math.floor((now.getTime() - downSince) / 60000));
       const sent = await sendNotification(context, buildWebsiteRecoveryNotification({

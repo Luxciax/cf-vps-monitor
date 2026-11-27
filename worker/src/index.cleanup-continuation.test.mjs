@@ -10,6 +10,7 @@ async function cleanupHarness(database) {
     return rpc(database, name, { input_before_time: before, input_max_batches: options.maxBatches });
   };
   const { runRecordCleanup } = await loadTypeScriptFunctions(new URL('./index.ts', import.meta.url), ['runRecordCleanup'], {
+    infra: (_env, operation, payload, actor) => rpc(database, 'cfm_infra', {p_operation: operation, p_payload: payload, p_actor: actor}),
     RECORD_CLEANUP_LAST_RUN_KEY: 'maintenance_last_cleanup_at', RECORD_CLEANUP_INTERVAL_MS: 86_400_000,
     db: {
       deleteOldRecords: deletes('cfm_delete_old_records'),

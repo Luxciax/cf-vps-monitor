@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 
 import { MACHINE_API_ENDPOINTS, buildMachineOpenApiDocument } from './machine-api.ts';
+import { ADMIN_API_SCOPES } from '../auth/admin-api-token.ts';
 
 function routeKey(method, path) {
   return method.toUpperCase() + ' ' + path;
@@ -23,7 +24,7 @@ function routeDeclarations(source, routerName, prefix = '') {
 
 test('machine API endpoint manifest has unique method/path pairs and valid scopes', () => {
   const keys = new Set();
-  const validScopes = new Set(['read', 'write', 'backup', 'restore']);
+  const validScopes = new Set(ADMIN_API_SCOPES);
   for (const endpoint of MACHINE_API_ENDPOINTS) {
     assert.ok(validScopes.has(endpoint.scope), 'invalid scope for ' + endpoint.method + ' ' + endpoint.path);
     const key = routeKey(endpoint.method, endpoint.path);
@@ -52,10 +53,12 @@ test('every canonical machine API endpoint is actually registered', () => {
   const adminSource = readFileSync(new URL('./admin.ts', import.meta.url), 'utf8');
   const themeSource = readFileSync(new URL('./theme.ts', import.meta.url), 'utf8');
   const machineSource = readFileSync(new URL('./machine-api.ts', import.meta.url), 'utf8');
+  const infraSource = readFileSync(new URL('./infrastructure.ts', import.meta.url), 'utf8');
   const registered = new Set([
     ...routeDeclarations(adminSource, 'adminRoutes'),
     ...routeDeclarations(themeSource, 'adminThemeRoutes', '/themes'),
     ...routeDeclarations(machineSource, 'machineApiRoutes'),
+    ...routeDeclarations(infraSource, 'infrastructureRoutes'),
   ].map(item => routeKey(item.method, item.path)));
 
   const missing = MACHINE_API_ENDPOINTS

@@ -1,3 +1,4 @@
+import { checkWebsiteContent, isWebsiteAlertSilenced, isWebsiteInMaintenance, parseWebsiteCheckConfig, readBoundedMonitorBody, type WebsiteCheckConfig, type WebsiteCheckDetails } from './website-check-config.ts';
 import {
   buildWebsiteAlertNotification,
   buildWebsiteRecoveryNotification,
@@ -9,6 +10,7 @@ export type WebsiteMonitorMethod = 'GET' | 'HEAD' | 'TCP';
 export type WebsiteAgentProbeMode = 'off' | 'selected' | 'country_auto';
 
 export interface WebsiteMonitorInput {
+  check_config?: WebsiteCheckConfig;
   name: string;
   url: string;
   method: WebsiteMonitorMethod;
@@ -49,6 +51,7 @@ export interface WebsiteFetchNormalizationInput {
 }
 
 export interface WebsiteFetchResult {
+  details?: WebsiteCheckDetails;
   ok: boolean;
   effective_status: 'up' | 'down';
   effective_reason: string;
@@ -59,6 +62,7 @@ export interface WebsiteFetchResult {
 }
 
 export type WebsiteProbeMonitor = {
+  check_config?: WebsiteCheckConfig;
   id: number;
   config_revision: string;
   url: string;
@@ -69,12 +73,14 @@ export type WebsiteProbeMonitor = {
 };
 
 type MaybeDueMonitor = {
+  check_config?: WebsiteCheckConfig;
   enabled: boolean;
   interval_sec: number;
   last_checked_at: string | null;
 };
 
 type MaybeAlertMonitor = {
+  check_config?: WebsiteCheckConfig;
   enabled: boolean;
   status: string;
   grace_period_sec: number;
@@ -235,6 +241,14 @@ export function validateWebsiteMonitorInput(input: Record<string, unknown>): Web
   const method = input.method === 'TCP' ? 'TCP' : input.method === 'HEAD' ? 'HEAD' : input.method === 'GET' || !input.method ? 'GET' : null;
   if (!method) return { ok: false, error: 'invalid_method' };
 
+  const config = parseWebsiteCheckConfig(input.check_config);
+  if (!config.ok) return config;
+  const kind = config.value.kind || (method === 'TCP' ? 'tcp' : 'http');
+  if ((kind === 'tcp') !== (method === 'TCP')) return { ok: false, error: 'check_kind_method_mismatch' };
+  if ((config.value.keyword !== undefined || config.value.json_path !== undefined) && (kind !== 'http' || method !== 'GET')) return { ok: false, error: 'content_check_requires_http_get' };
+  if (kind === 'websocket' && ['ws:', 'wss:'].includes(parsed.protocol)) parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
+  if (kind !== 'dns' && (config.value.dns_type !== undefined || config.value.dns_expected !== undefined)) return { ok: false, error: 'dns_options_require_dns_check' };
+  if (config.value.tls_warning_days && (parsed.protocol !== 'https:' || !['http', 'websocket'].includes(kind))) return { ok: false, error: 'certificate_check_requires_tls' };
   const urlError = method === 'TCP' ? validateTcpUrl(parsed) : validateWebsiteUrl(parsed);
   if (urlError) return { ok: false, error: urlError };
 
@@ -263,6 +277,7 @@ export function validateWebsiteMonitorInput(input: Record<string, unknown>): Web
   return {
     ok: true,
     value: {
+      check_config: config.value,
       name,
       url: parsed.toString(),
       method,
@@ -295,9 +310,6 @@ export function normalizeWebsiteFetchResult(input: WebsiteFetchNormalizationInpu
   const latency_ms = Math.max(0, Math.round(input.latencyMs));
   if (typeof input.status === 'number') {
     const inRange = input.status >= input.min && input.status <= input.max;
-    // ponytail: this is availability monitoring, not content verification. Some large sites return
-    // WAF/login/challenge statuses to Worker probes while the site is reachable; add exact status
-    // code lists later if this grows beyond the default HTTP monitor.
     const challengeReachable = input.min === 200 && input.max === 399 && REACHABLE_CHALLENGE_STATUSES.has(input.status);
     const ok = inRange || challengeReachable;
     return {
@@ -312,7 +324,7 @@ export function normalizeWebsiteFetchResult(input: WebsiteFetchNormalizationInpu
   }
 
   const message = input.error instanceof Error ? input.error.message.toLowerCase() : String(input.error || '').toLowerCase();
-  const error = /unsafe_redirect/.test(message)
+  const error = /content_too_large/.test(message) ? 'content_too_large' : /unsafe_redirect/.test(message)
     ? 'unsafe_redirect'
     : /unsafe_host/.test(message)
       ? 'unsafe_host'
@@ -345,6 +357,7 @@ export async function checkWebsiteMonitorTcp(monitor: WebsiteProbeMonitor, conne
   raw_status_code: number | null;
   latency_ms: number;
   error: string | null;
+  details?: WebsiteCheckDetails;
 }> {
   const started = Date.now();
   const checkedAt = new Date(started).toISOString();
@@ -420,8 +433,11 @@ export async function checkWebsiteMonitorHttp(monitor: WebsiteProbeMonitor): Pro
   raw_status_code: number | null;
   latency_ms: number;
   error: string | null;
+  details?: WebsiteCheckDetails;
 }> {
   if (monitor.method === 'TCP') return checkWebsiteMonitorTcp(monitor);
+  if (monitor.check_config?.kind === 'dns') return checkWebsiteMonitorDns(monitor);
+  if (monitor.check_config?.kind === 'websocket') return checkWebsiteMonitorWebsocket(monitor);
 
   const started = Date.now();
   const checkedAt = new Date(started).toISOString();
@@ -441,7 +457,10 @@ export async function checkWebsiteMonitorHttp(monitor: WebsiteProbeMonitor): Pro
       headers: WEBSITE_PROBE_HEADERS,
     });
     const location = response.headers.get('Location');
-    if (response.body) await response.body.cancel().catch(() => undefined);
+    let contentError: string | null = null;
+    const contentCheck = monitor.check_config?.keyword !== undefined || monitor.check_config?.json_path !== undefined;
+    if (contentCheck) contentError = checkWebsiteContent(await readBoundedMonitorBody(response), monitor.check_config!);
+    else if (response.body) await response.body.cancel().catch(() => undefined);
     if (location && response.status >= 300 && response.status <= 399) {
       const nextUrl = new URL(location, url);
       const redirectUrlError = validateWebsiteUrl(nextUrl);
@@ -454,10 +473,12 @@ export async function checkWebsiteMonitorHttp(monitor: WebsiteProbeMonitor): Pro
       min: monitor.expected_status_min,
       max: monitor.expected_status_max,
     });
+    if (contentError) { normalized.ok = false; normalized.effective_status = 'down'; normalized.effective_reason = contentError; normalized.error = contentError; }
     return {
       monitor_id: monitor.id,
       config_revision: configRevision,
       checked_at: checkedAt,
+      details: { content_checked: contentCheck, tls_expires_at: null, tls_days_remaining: null, tls_status: 'unknown' },
       ok: normalized.ok,
       effective_status: normalized.effective_status,
       effective_reason: normalized.effective_reason,
@@ -492,18 +513,18 @@ export async function checkWebsiteMonitorHttp(monitor: WebsiteProbeMonitor): Pro
 }
 
 export function isWebsiteCheckDue(monitor: MaybeDueMonitor, now = new Date()): boolean {
-  if (!monitor.enabled) return false;
+  if (!monitor.enabled || isWebsiteInMaintenance(monitor.check_config, now)) return false;
   if (!monitor.last_checked_at) return true;
   return now.getTime() - new Date(monitor.last_checked_at).getTime() >= Math.max(1, monitor.interval_sec - WEBSITE_CHECK_DUE_TOLERANCE_SECONDS) * 1000;
 }
 
 export function shouldNotifyWebsiteDown(monitor: MaybeAlertMonitor, now = new Date()): boolean {
-  if (!monitor.enabled || monitor.status !== 'down' || monitor.last_notified_at || !monitor.down_since) return false;
+  if (isWebsiteAlertSilenced(monitor.check_config, now) || !monitor.enabled || monitor.status !== 'down' || monitor.last_notified_at || !monitor.down_since) return false;
   return now.getTime() - new Date(monitor.down_since).getTime() >= monitor.grace_period_sec * 1000;
 }
 
-export function shouldNotifyWebsiteRecovery(monitor: { enabled: boolean; status: string; last_notified_at: string | null }): boolean {
-  return monitor.enabled && monitor.status === 'up' && Boolean(monitor.last_notified_at);
+export function shouldNotifyWebsiteRecovery(monitor: { enabled: boolean; status: string; last_notified_at: string | null; check_config?: WebsiteCheckConfig }, now = new Date()): boolean {
+  return !isWebsiteAlertSilenced(monitor.check_config, now) && monitor.enabled && monitor.status === 'up' && Boolean(monitor.last_notified_at);
 }
 
 export function buildWebsiteAlertMessage(input: {
@@ -524,4 +545,94 @@ export function buildWebsiteRecoveryMessage(input: {
   latencyMs: number | null;
 }): string {
   return buildWebsiteRecoveryNotification(input).body;
+}
+
+type ExtendedWebsiteCheck = WebsiteFetchResult & { monitor_id: number; config_revision: string; checked_at: string };
+function completedExtendedCheck(monitor: WebsiteProbeMonitor, started: number, reason: string, ok: boolean, details: WebsiteCheckDetails = {}): ExtendedWebsiteCheck {
+  return { monitor_id: monitor.id, config_revision: monitor.config_revision, checked_at: new Date(started).toISOString(), ok, effective_status: ok ? 'up' : 'down', effective_reason: reason, status_code: null, raw_status_code: null, latency_ms: Math.max(0, Date.now()-started), error: ok ? null : reason, details };
+}
+export async function checkWebsiteMonitorDns(monitor: WebsiteProbeMonitor): Promise<ExtendedWebsiteCheck> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, monitor.timeout_sec)*1000);
+  try {
+    const target = new URL(monitor.url);
+    const invalid = validateWebsiteUrl(target);
+    if (invalid) return completedExtendedCheck(monitor, started, invalid, false);
+    const type = monitor.check_config?.dns_type || 'A';
+    const typeCodes = { A: 1, AAAA: 28, CNAME: 5, MX: 15, TXT: 16, NS: 2 };
+    const resolver = new URL('https://cloudflare-dns.com/dns-query');
+    resolver.searchParams.set('name', target.hostname);
+    resolver.searchParams.set('type', type);
+    const response = await scheduledFetch(resolver, { headers: { Accept: 'application/dns-json' }, signal: controller.signal, redirect: 'error' });
+    if (!response.ok) { await response.body?.cancel(); return completedExtendedCheck(monitor, started, 'dns_resolver_error', false); }
+    const data = JSON.parse(await readBoundedMonitorBody(response, 64*1024)) as { Status?: number; Answer?: Array<{ type: number; data: string }> };
+    if (data.Status !== 0) return completedExtendedCheck(monitor, started, data.Status === 3 ? 'dns_nxdomain' : 'dns_response_error', false);
+    const answers = (Array.isArray(data.Answer) ? data.Answer : [])
+      .filter(answer => answer.type === typeCodes[type] && typeof answer.data === 'string')
+      .slice(0, 100)
+      .map(answer => type === 'TXT' ? dnsTextValue(answer.data) : answer.data)
+      .sort();
+    const normalize = (value: string) => {
+      if (['CNAME','NS','MX'].includes(type)) return value.toLowerCase().replace(/\.$/, '');
+      if (type === 'AAAA') {
+        try { return new URL(`http://[${value}]/`).hostname; } catch { return value; }
+      }
+      return value;
+    };
+    const expected = monitor.check_config?.dns_expected || [];
+    const ok = answers.length > 0 && expected.every(value => answers.some(answer => normalize(answer) === normalize(value)));
+    return completedExtendedCheck(monitor, started, ok ? 'dns_answer_match' : answers.length ? 'dns_answer_mismatch' : 'dns_no_answers', ok, { dns_answers: answers.map(answer => answer.slice(0, 512)) });
+  } catch (error) {
+    if (error instanceof ScheduledBudgetExceeded) throw error;
+    return completedExtendedCheck(monitor, started, controller.signal.aborted ? 'timeout' : 'dns_error', false);
+  } finally { clearTimeout(timeout); }
+}
+
+// DoH JSON encodes TXT RDATA as quoted DNS character strings; Go's resolver
+// already returns their joined text. Compare the same value at both locations.
+function dnsTextValue(raw: string): string {
+  if (!raw.trimStart().startsWith('"')) return raw;
+  let result = '';
+  let index = 0;
+  while (index < raw.length) {
+    while (/\s/.test(raw[index] || '') && index < raw.length) index++;
+    if (index === raw.length) break;
+    if (raw[index++] !== '"') return raw;
+    let closed = false;
+    while (index < raw.length) {
+      const character = raw[index++];
+      if (character === '"') { closed = true; break; }
+      if (character !== '\\') { result += character; continue; }
+      if (index >= raw.length) return raw;
+      const decimal = raw.slice(index, index + 3);
+      if (/^\d{3}$/.test(decimal)) {
+        const byte = Number(decimal);
+        if (byte > 255) return raw;
+        result += String.fromCharCode(byte);
+        index += 3;
+      } else result += raw[index++];
+    }
+    if (!closed) return raw;
+  }
+  return result;
+}
+export async function checkWebsiteMonitorWebsocket(monitor: WebsiteProbeMonitor): Promise<ExtendedWebsiteCheck> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, monitor.timeout_sec)*1000);
+  try {
+    const target = new URL(monitor.url);
+    const invalid = validateWebsiteUrl(target);
+    if (invalid) return completedExtendedCheck(monitor, started, invalid, false);
+    const response = await scheduledFetch(target, { headers: { Upgrade: 'websocket' }, signal: controller.signal, redirect: 'manual' });
+    const socket = response.webSocket;
+    if (response.status !== 101 || !socket) { await response.body?.cancel(); return completedExtendedCheck(monitor, started, 'websocket_handshake_failed', false); }
+    socket.accept();
+    socket.close(1000, 'availability probe complete');
+    return completedExtendedCheck(monitor, started, 'websocket_handshake', true, { tls_status: 'unknown', tls_expires_at: null });
+  } catch (error) {
+    if (error instanceof ScheduledBudgetExceeded) throw error;
+    return completedExtendedCheck(monitor, started, controller.signal.aborted ? 'timeout' : 'websocket_handshake_failed', false);
+  } finally { clearTimeout(timeout); }
 }

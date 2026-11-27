@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Loading from '../../components/Loading';
+import MonitorAssetLink from '../../infrastructure/MonitorAssetLink';
 import { useApi } from '../../contexts/AuthContext';
 import { useLiveData } from '../../contexts/LiveDataContext';
 import Flag from '../../components/Flag';
@@ -533,6 +534,7 @@ function DetailDialog({ client, open, onOpenChange }: { client: AdminClient; ope
       <Dialog.Content className="admin-node-dialog" style={{ maxWidth: 600 }}>
         <Dialog.Title>机器详细信息</Dialog.Title>
         <Dialog.Description size="2" mb="3">{client.name}</Dialog.Description>
+        {open && <Box mb="3"><MonitorAssetLink monitorType="client" monitorId={client.uuid} /></Box>}
         <Flex className="admin-node-detail-list" direction="column" gap="1">
           {fields.map(([label, value]) => (
             <div key={label} className="admin-node-detail-row">

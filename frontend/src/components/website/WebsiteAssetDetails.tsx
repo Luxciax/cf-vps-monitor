@@ -10,6 +10,9 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { WebsiteAssetViewModel } from './WebsiteAssetCard';
+import WebsiteStatistics from '../WebsiteStatistics';
+import WebsiteCertificateStatus from '../WebsiteCertificateStatus';
+import MonitorAssetLink from '../../infrastructure/MonitorAssetLink';
 
 const statusLabels = {
   up: '在线',
@@ -60,7 +63,7 @@ export default function WebsiteAssetDetails({
           <DetailItem
             icon={<Timer size={16} />}
             label="当前检测"
-            value={`${statusCode ? `HTTP ${statusCode} · ` : ''}${monitor.last_latency_ms ?? 0} ms`}
+            value={`${statusCode ? `HTTP ${statusCode} · ` : ''}${monitor.last_latency_ms == null ? '延迟未知' : `${monitor.last_latency_ms} ms`}`}
           />
           <DetailItem
             icon={<Clock3 size={16} />}
@@ -69,6 +72,9 @@ export default function WebsiteAssetDetails({
           />
         </div>
 
+        <WebsiteCertificateStatus expiresAt={monitor.tls_expires_at} observedAt={monitor.tls_observed_at} />
+        {open && <WebsiteStatistics monitorId={monitor.id} />}
+
         <div className="website-asset-details-tags">
           {metadata.tags.map((tag) => <Badge key={tag} variant="soft" color="gray">{tag}</Badge>)}
         </div>
@@ -76,6 +82,7 @@ export default function WebsiteAssetDetails({
         {metadata.note && <Text as="p" color="gray">{metadata.note}</Text>}
 
         <Flex gap="3" justify="end" wrap="wrap" className="website-asset-details-actions">
+          {open && <MonitorAssetLink monitorType="website" monitorId={monitor.id} />}
           {metadata.repository_url && (
             <Button asChild variant="soft" color="gray">
               <a href={metadata.repository_url} target="_blank" rel="noopener noreferrer">

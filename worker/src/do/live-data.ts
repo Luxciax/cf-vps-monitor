@@ -1,3 +1,4 @@
+import { isWebsiteInMaintenance, normalizeWebsiteCheckDetails } from '../utils/website-check-config';
 /**
  * LiveDataDO - Durable Object 用于 WebSocket 实时数据推送
  *
@@ -1915,7 +1916,8 @@ export class LiveDataDO {
       if (!(await this.isRecordPersistenceEnabled(nowMs))) return;
       if (!(await this.canPersistWithinCapacity(nowMs))) return;
 
-      const assigned = new Set((await this.getWebsiteProbeTasks(nowMs, clientId, true)).map(task => task.id));
+      const assignedTasks = await this.getWebsiteProbeTasks(nowMs, clientId, true);
+      const assigned = new Set(assignedTasks.filter(task => !isWebsiteInMaintenance(task.check_config, new Date(nowMs))).map(task => task.id));
       if (assigned.size === 0) return;
       const checkedAt = new Date(nowMs).toISOString();
       let changed = false;
@@ -1954,11 +1956,12 @@ export class LiveDataDO {
           error: typeof item.error === 'string' && item.error ? item.error.slice(0, 120) : null,
           source_type: 'agent',
           source_client: clientId,
+          details: normalizeWebsiteCheckDetails(item.details),
         });
         if (!updated) continue;
         changed = true;
 
-        if (effectiveStatus === 'down' && updated.agent_probe_status_enabled && !fallbackChecked.has(monitorId)) {
+        if (effectiveStatus === 'down' && updated.agent_probe_status_enabled && !isWebsiteInMaintenance(updated.check_config, new Date(nowMs)) && !fallbackChecked.has(monitorId)) {
           fallbackChecked.add(monitorId);
           const fallbackCheck = await checkWebsiteMonitorHttp(updated);
           const fallbackUpdated = await db.recordWebsiteCheck(database, fallbackCheck);

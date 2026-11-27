@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"reflect"
 	"strings"
 )
 
@@ -24,7 +25,7 @@ func samePingProbe(a, b PingTask) bool {
 	return strings.EqualFold(a.Type, b.Type) && a.Target == b.Target
 }
 func sameWebsiteProbe(a, b WebsiteProbeTask) bool {
-	return a.ConfigRevision == b.ConfigRevision && a.URL == b.URL && strings.EqualFold(a.Method, b.Method) && a.ExpectedStatusMin == b.ExpectedStatusMin && a.ExpectedStatusMax == b.ExpectedStatusMax && a.TimeoutSec == b.TimeoutSec
+	return a.ConfigRevision == b.ConfigRevision && a.URL == b.URL && strings.EqualFold(a.Method, b.Method) && a.ExpectedStatusMin == b.ExpectedStatusMin && a.ExpectedStatusMax == b.ExpectedStatusMax && a.TimeoutSec == b.TimeoutSec && reflect.DeepEqual(a.CheckConfig, b.CheckConfig)
 }
 
 func (s *pingReportState) invalidateResultsForPolicyLocked(pings []PingTask, websites []WebsiteProbeTask) {

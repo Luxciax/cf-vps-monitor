@@ -4,6 +4,10 @@
  */
 
 import { Hono } from 'hono';
+import { infra } from '../infra/service';
+import { discoveryInput, InfraError } from '../infra/validation';
+import type { JsonObject } from '../infra/types';
+import { readJsonWithLimit } from '../utils/request-body';
 import type { Context, Next } from 'hono';
 import type { Bindings, Variables } from '../index';
 import * as db from '../db/queries';
@@ -1286,3 +1290,18 @@ clientRoutes.post('/ping/result', clientIdentityAuth, async (c) => {
 });
 
 export { clientRoutes, clientAuth, clientIdentityAuth };
+
+clientRoutes.post('/discovery', clientAuth, async (c) => {
+  const limited = await enforceAgentRateLimit(c, 'agent-discovery', 2);
+  if (limited) return limited;
+  const parsed = await readJsonWithLimit(c.req.raw, 524288);
+  if (!parsed.ok) return c.json({code: parsed.reason === 'too_large' ? 'PAYLOAD_TOO_LARGE' : 'VALIDATION_ERROR', error: parsed.reason}, parsed.reason === 'too_large' ? 413 : 400);
+  try {
+    const clientId = c.get('clientUuid')!;
+    const report = discoveryInput(parsed.body, `agent:${clientId}`, clientId);
+    return c.json(await infra(c.env, 'discovery.submit', report as unknown as JsonObject, `agent:${clientId}`));
+  } catch (error) {
+    if (error instanceof InfraError) return c.json({code:error.code,error:error.message},error.status);
+    return c.json({code:'DISCOVERY_UNAVAILABLE',error:'Discovery was not stored; retry the report'},503);
+  }
+});

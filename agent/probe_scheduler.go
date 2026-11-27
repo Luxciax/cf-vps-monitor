@@ -167,16 +167,15 @@ func (s *pingReportState) runPingProbe(ctx context.Context, task PingTask, run *
 func (s *pingReportState) runWebsiteProbe(ctx context.Context, task WebsiteProbeTask, run *probeRun) {
 	defer s.probeWorkers.Done()
 	defer run.cancel()
+	maintenance := websiteMaintenanceActive(task.CheckConfig, time.Now())
 	var result WebsiteProbeResult
-	if strings.EqualFold(task.Method, "TCP") {
-		result = executeWebsiteTCPProbeWithContext(ctx, task)
-	} else {
-		result = executeWebsiteHTTPProbeWithContext(ctx, task)
+	if !maintenance {
+		result = executeWebsiteProbeWithContext(ctx, task)
 	}
 	s.mu.Lock()
 	if s.runningWebsites[task.ID] == run {
 		delete(s.runningWebsites, task.ID)
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && !maintenance {
 			s.queueWebsiteResultsLocked([]WebsiteProbeResult{result})
 		}
 	}

@@ -1,3 +1,5 @@
+import { isWebsiteInMaintenance } from '../../worker/src/utils/website-check-config.ts';
+import { certificateReminderDue, buildCertificateExpiryNotification } from '../../worker/src/utils/certificate-notifications.ts';
 import * as notificationDispatch from '../../worker/src/utils/notification-dispatch.ts';
 import * as offline from '../../worker/src/utils/offline-notification.ts';
 import { shouldNotifyWebsiteDown, shouldNotifyWebsiteRecovery } from '../../worker/src/utils/website-monitor.ts';
@@ -53,7 +55,8 @@ export async function notificationHarness(database, transport, databaseOverrides
     buildOfflineNotification: message('offline'), buildNodeRecoveryNotification: message('recovery'),
     buildExpiryNotification: message('expiry'), buildLoadNotification: message('load'),
     buildWebsiteAlertNotification: message('website-down'), buildWebsiteRecoveryNotification: message('website-up'),
-    shouldNotifyWebsiteDown, shouldNotifyWebsiteRecovery,
+    shouldNotifyWebsiteDown, shouldNotifyWebsiteRecovery, isWebsiteInMaintenance, certificateReminderDue, buildCertificateExpiryNotification,
+    markCertificateNotified: (_env, monitor) => rpc(database, 'cfm_mark_certificate_notified', { input_monitor_id: monitor.id, input_expires_at: monitor.tls_expires_at, input_config_revision: monitor.config_revision }),
     checkWebsiteMonitorHttp: async monitor => ({
       monitor_id: monitor.id, config_revision: monitor.config_revision, checked_at: state.now.toISOString(), ok: state.websiteUp,
       effective_status: state.websiteUp ? 'up' : 'down', effective_reason: 'synthetic',

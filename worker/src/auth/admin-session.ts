@@ -33,8 +33,10 @@ export function invalidateAdminSessionCache(userId?: string): void {
 export async function validateAdminSession(
   database: db.QueryDatabase,
   payload: AdminJwtPayload,
+  fresh = false,
 ): Promise<AdminSessionUser | null> {
   const key = cacheKey(payload);
+  if (fresh) return readAdminSession(database, payload, key);
   const cached = adminSessionCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.user;
 

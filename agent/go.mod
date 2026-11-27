@@ -1,11 +1,11 @@
 module github.com/cf-vps-monitor/agent
 
-go 1.26.10
+go 1.26.11
 
 require (
-	github.com/gorilla/websocket v1.5.3
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 	github.com/shirou/gopsutil/v3 v3.23.2
-	golang.org/x/sys v0.44.0
+	golang.org/x/sys v0.50.0
 )
 
 require (
@@ -15,4 +15,5 @@ require (
 	github.com/tklauser/go-sysconf v0.3.11 // indirect
 	github.com/tklauser/numcpus v0.6.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
+	golang.org/x/net v0.63.0 // indirect
 )

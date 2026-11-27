@@ -7,7 +7,9 @@ const severities = ['info', 'low', 'moderate', 'high', 'critical'];
 
 function requireSuccessfulScan(name, result) {
   if (result.error || result.status !== 0 || typeof result.stdout !== 'string') {
-    const detail = result.error?.message || result.stderr || result.stdout || 'scanner did not complete';
+    // Go can write download progress to stderr and actual findings to stdout.
+    // Preserve both; a progress line must not hide the actionable vulnerability.
+    const detail = [result.error?.message, result.stdout, result.stderr].filter(value => typeof value === 'string' && value.trim()).join('\n') || 'scanner did not complete';
     throw new Error(`${name} failed (exit ${result.status ?? 'unavailable'}):\n${String(detail).trim().slice(0, 12000)}`);
   }
 }

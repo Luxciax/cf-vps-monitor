@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { BUNDLED_SUPABASE_MIGRATIONS } from '../../generated/supabase-migrations.ts';
 
 const migrationsUrl = new URL('../../../../supabase/migrations/', import.meta.url);
-const migrationFiles = (await readdir(migrationsUrl)).filter((name) => name.endsWith('.sql')).sort();
-assert.deepEqual(migrationFiles, [
+const migrationFiles = (await readdir(migrationsUrl)).filter((name) => name.endsWith('.sql')).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+const legacyMigrationFiles = [
   '1_core_schema.sql',
   '2_security_access.sql',
   '3_feature_schema.sql',
@@ -13,17 +14,25 @@ assert.deepEqual(migrationFiles, [
   '6_website_assets_dashboard.sql',
   '7_website_delete_batches.sql',
   '8_website_assets_hide_url.sql',
-]);
-assert.deepEqual(BUNDLED_SUPABASE_MIGRATIONS.map(({ version }) => version), [
-  '1_core_schema',
-  '2_security_access',
-  '3_feature_schema',
-  '4_rpc_api',
-  '5_runtime_defaults',
-  '6_website_assets_dashboard',
-  '7_website_delete_batches',
-  '8_website_assets_hide_url',
-]);
+];
+const infrastructureMigrationFiles = [
+  '20261127111500_infrastructure_schema.sql',
+  '20261127111509_infrastructure_rpc.sql',
+  '20261127111515_machine_token_security.sql',
+  '20261127111522_monitor_extensions.sql',
+  '20261127111529_operations_knowledge.sql',
+  '20261127112419_infrastructure_backup.sql',
+];
+const expectedMigrationFiles = [...legacyMigrationFiles, ...infrastructureMigrationFiles];
+assert.deepEqual(migrationFiles, expectedMigrationFiles, 'legacy migrations must remain first, followed by every declared infrastructure migration');
+assert.deepEqual(BUNDLED_SUPABASE_MIGRATIONS.map(({ version }) => version), expectedMigrationFiles.map(name => name.replace(/\.sql$/, '')));
+for (const [index, file] of migrationFiles.entries()) {
+  const sql = (await readFile(new URL(file, migrationsUrl), 'utf8'))
+    .replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+    .replace(/^\s*begin\s*;\s*/i, '').replace(/\s*commit\s*;\s*$/i, '').trim();
+  assert.equal(BUNDLED_SUPABASE_MIGRATIONS[index].sql, sql, `${file} bundle must contain current source SQL`);
+  assert.equal(BUNDLED_SUPABASE_MIGRATIONS[index].checksum, createHash('sha256').update(sql).digest('hex'), `${file} checksum must match bundled SQL`);
+}
 
 const featureSchemaSql = await readFile(new URL('3_feature_schema.sql', migrationsUrl), 'utf8');
 const migrationSql = await readFile(new URL('../../../../supabase/migrations/4_rpc_api.sql', import.meta.url), 'utf8');

@@ -39,6 +39,13 @@ const AdminThemes = lazy(() => import('./pages/admin/Themes'));
 const AdminLogs = lazy(() => import('./pages/admin/AuditLogs'));
 const AdminAccount = lazy(() => import('./pages/admin/Account'));
 const AdminAbout = lazy(() => import('./pages/admin/About'));
+const InfrastructureAssets = lazy(() => import('./pages/admin/infrastructure/Assets'));
+const InfrastructureAssetDetail = lazy(() => import('./pages/admin/infrastructure/AssetDetail'));
+const InfrastructureDiscovery = lazy(() => import('./pages/admin/infrastructure/Discovery'));
+const InfrastructureChanges = lazy(() => import('./pages/admin/infrastructure/Changes'));
+const InfrastructureKnowledge = lazy(() => import('./pages/admin/infrastructure/Knowledge'));
+const InfrastructureBaselines = lazy(() => import('./pages/admin/infrastructure/Baselines'));
+const InfrastructureApiAccess = lazy(() => import('./pages/admin/infrastructure/ApiAccess'));
 
 function preloadRouteChunks() {
   // ponytail: preload after first public data; per-route hover prefetch if this grows.
@@ -132,6 +139,14 @@ export default function App() {
                 <Route path="/admin" element={<AdminLayout />}>
                   <Route index element={<LiveDataRoute><AdminDashboard /></LiveDataRoute>} />
                   <Route path="clients" element={<Navigate to="/admin" replace />} />
+                  <Route path="infrastructure" element={<InfrastructureAssets />} />
+                  <Route path="assets" element={<Navigate to="/admin/infrastructure" replace />} />
+                  <Route path="assets/:id" element={<InfrastructureAssetDetail />} />
+                  <Route path="discovery" element={<InfrastructureDiscovery />} />
+                  <Route path="changes" element={<InfrastructureChanges />} />
+                  <Route path="knowledge" element={<InfrastructureKnowledge />} />
+                  <Route path="baselines" element={<InfrastructureBaselines />} />
+                  <Route path="api" element={<InfrastructureApiAccess />} />
                   <Route path="websites" element={<AdminWebsites />} />
                   <Route path="settings" element={<SettingsLayout />}>
                     <Route index element={<SettingsSite />} />

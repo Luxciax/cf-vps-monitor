@@ -10,6 +10,7 @@ import {
   Layers
 } from 'lucide-react';
 import Loading from '../components/Loading';
+import MonitorAssetLink from '../infrastructure/MonitorAssetLink';
 import DetailsGrid from '../components/DetailsGrid';
 import Flag from '../components/Flag';
 import PingYAxisTick from '../components/PingYAxisTick';
@@ -332,6 +333,7 @@ export default function Instance() {
         <Button variant="ghost" onClick={() => navigate('/')}>
           <ArrowLeft size={16} /> 返回
         </Button>
+        <MonitorAssetLink monitorType="client" monitorId={client.uuid} />
       </Flex>
 
       {/* Header + compact details */}

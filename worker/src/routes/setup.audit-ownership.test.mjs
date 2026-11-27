@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorkerLoader } from '../../test-support/worker-module.mjs';
 
-const env = { JWT_SECRET: 'synthetic-audit-jwt-key-at-least-32-bytes', SUPABASE_SECRET_KEY: 'sb_secret_synthetic_owner_proof' };
+const env = { JWT_SECRET: 'synthetic-audit-jwt-key-at-least-32-bytes', SUPABASE_PROXY_URL: 'https://test-project.supabase.co/functions/v1/cfvm-db-proxy', SUPABASE_PROXY_TOKEN: 'synthetic-proxy-token-not-an-admin-credential', ADMIN_RECOVERY_ENABLED: 'true', ADMIN_RECOVERY_TOKEN: 'synthetic-independent-recovery-token-937437' };
 const input = { username: 'synthetic-admin', password: 'synthetic-passphrase-937' };
 
 function fixture({ initial = null, race = false } = {}) {
@@ -44,13 +44,13 @@ function fixture({ initial = null, race = false } = {}) {
 test('AUD-05: first administrator creation requires deployment ownership proof', async () => {
   for (const key of [undefined, 'wrong-synthetic-key']) {
     const f = fixture();
-    const response = await f.request({ ...input, supabase_secret_key: key });
+    const response = await f.request({ ...input, recovery_token: key });
     assert.equal(response.status, 403);
     assert.equal(f.user, null);
     assert.equal(f.resetCalls, 0);
   }
   const f = fixture();
-  const response = await f.request({ ...input, supabase_secret_key: env.SUPABASE_SECRET_KEY });
+  const response = await f.request({ ...input, recovery_token: env.ADMIN_RECOVERY_TOKEN });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).mode, 'created');
   assert.equal(f.user.username, input.username);
@@ -59,7 +59,7 @@ test('AUD-05: first administrator creation requires deployment ownership proof',
 
 test('AUD-05: stale empty-account observation cannot reset a concurrently created administrator', async () => {
   const f = fixture({ race: true });
-  const response = await f.request({ ...input, supabase_secret_key: env.SUPABASE_SECRET_KEY });
+  const response = await f.request({ ...input, recovery_token: env.ADMIN_RECOVERY_TOKEN });
   assert.equal(response.status, 409);
   assert.equal(f.user.username, 'original-owner');
   assert.equal(f.user.password, 'original-hash');
@@ -68,7 +68,7 @@ test('AUD-05: stale empty-account observation cannot reset a concurrently create
 
 test('AUD-05: authenticated recovery of the existing sole administrator remains available', async () => {
   const f = fixture({ initial: { uuid: 'old-owner', username: 'old-owner', session_version: 3 } });
-  const response = await f.request({ ...input, supabase_secret_key: env.SUPABASE_SECRET_KEY });
+  const response = await f.request({ ...input, recovery_token: env.ADMIN_RECOVERY_TOKEN });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).mode, 'reset');
   assert.equal(f.user.uuid, 'old-owner');

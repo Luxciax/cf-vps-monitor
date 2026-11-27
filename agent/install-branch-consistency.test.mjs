@@ -41,11 +41,13 @@ const targets = [
   {
     file: 'install-linux.sh',
     repo: /^CF_MONITOR_REPOSITORY="([^"]+)"/m,
+    releaseRepo: /^CF_MONITOR_RELEASE_REPOSITORY="([^"]+)"/m,
     branch: /^CF_MONITOR_BRANCH="([^"]+)"/m,
   },
   {
     file: 'install-windows.ps1',
     repo: /^\$repository\s*=\s*"([^"]+)"/m,
+    releaseRepo: /^\$releaseRepository\s*=\s*"([^"]+)"/m,
     branch: /^\$branch\s*=\s*"([^"]+)"/m,
   },
 ];

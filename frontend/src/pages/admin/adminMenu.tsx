@@ -1,6 +1,12 @@
 import React from 'react';
 import {
   Activity,
+  Boxes,
+  Search,
+  History,
+  ShieldCheck,
+  BookOpen,
+  KeyRound,
   AtSign,
   Bell,
   Bolt,
@@ -26,6 +32,12 @@ export interface AdminMenuItem {
 }
 
 export const adminMenuItems: AdminMenuItem[] = [
+  { path: '/admin/infrastructure', label: '基础设施', icon: <Boxes size={18} /> },
+  { path: '/admin/discovery', label: '发现收件箱', icon: <Search size={18} /> },
+  { path: '/admin/changes', label: '变更时间线', icon: <History size={18} /> },
+  { path: '/admin/baselines', label: '配置基线', icon: <ShieldCheck size={18} /> },
+  { path: '/admin/knowledge', label: '运维知识库', icon: <BookOpen size={18} /> },
+  { path: '/admin/api', label: 'AI 与 API', icon: <KeyRound size={18} /> },
   { path: '/admin', label: '服务器', icon: <Server size={18} /> },
   { path: '/admin/websites', label: '网站', icon: <Globe2 size={18} /> },
   {
@@ -56,6 +68,7 @@ export const adminMenuItems: AdminMenuItem[] = [
 ];
 
 export function isAdminMenuPathActive(itemPath: string, currentPath: string) {
+  if (itemPath === '/admin/infrastructure') return currentPath.startsWith('/admin/infrastructure') || currentPath.startsWith('/admin/assets');
   if (itemPath === '/admin/settings') return currentPath.startsWith('/admin/settings');
   if (itemPath === '/admin/notifications') {
     return currentPath.startsWith('/admin/notifications') ||
@@ -107,6 +120,8 @@ export function isAdminChildPathActive(childPath: string, currentPath: string) {
 }
 
 export function getAdminSectionTitle(pathname: string) {
+  const section = adminMenuItems.find(item => item.path !== '/admin' && !item.children && isAdminMenuPathActive(item.path, pathname));
+  if (section) return section.label;
   if (
     pathname.startsWith('/admin/notifications/settings') ||
     pathname.startsWith('/admin/settings/notification')

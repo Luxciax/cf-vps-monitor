@@ -17,6 +17,8 @@ export type WebsiteMonitorStatus = 'pending' | 'up' | 'down' | 'paused';
 const DEFAULT_WEBSITE_INTERVAL_SEC = 120;
 
 export interface WebsiteMonitorSummary {
+  tls_expires_at?: string | null;
+  tls_observed_at?: string | null;
   id: number;
   name: string;
   /** 勾选「对游客隐藏地址」时服务端返回 null——此时不得渲染任何链接。 */
@@ -81,7 +83,7 @@ function safeBackgroundImage(value: unknown) {
   return '';
 }
 
-function normalizeDashboardBackground(config: Record<string, unknown>): DashboardBackgroundSettings {
+export function normalizeDashboardBackground(config: Record<string, unknown>): DashboardBackgroundSettings {
   const position = config.dashboardBackgroundPosition;
   const size = config.dashboardBackgroundSize;
   return {

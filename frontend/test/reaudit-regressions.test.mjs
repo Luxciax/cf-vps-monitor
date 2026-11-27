@@ -71,7 +71,10 @@ test('R-F01 website mutation events do not expose administrator rows', () => {
 test('R-F01 public website normalization defends against an older full administrator event', () => {
   const file = 'src/pages/Index.tsx';
   const readWebsiteHidden = productionDeclaration(file, 'readWebsiteHidden');
-  const normalize = productionDeclaration(file, 'normalizeWebsiteSummary', { readWebsiteHidden });
+  const normalize = productionDeclaration(file, 'normalizeWebsiteSummary', {
+    readWebsiteHidden,
+    ...productionModule('src/utils/websiteHealth.ts'),
+  });
   const monitor = { id: 1, name: 'Synthetic', url: 'https://private.invalid/path', hidden: false, hide_url: true };
   assert.equal(normalize(monitor).url, null, 'anonymous consumer independently respects hide_url');
   assert.equal(normalize(monitor, { includeHidden: true }).url, monitor.url, 'explicit administrator view may retain the address');

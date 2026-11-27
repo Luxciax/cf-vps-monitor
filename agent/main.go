@@ -257,27 +257,29 @@ type PingResult struct {
 }
 
 type WebsiteProbeTask struct {
-	ID                int    `json:"id"`
-	ConfigRevision    string `json:"config_revision"`
-	Name              string `json:"name"`
-	URL               string `json:"url"`
-	Method            string `json:"method"`
-	ExpectedStatusMin int    `json:"expected_status_min"`
-	ExpectedStatusMax int    `json:"expected_status_max"`
-	TimeoutSec        int    `json:"timeout_sec"`
-	IntervalSec       int    `json:"interval_sec"`
+	CheckConfig       WebsiteCheckConfig `json:"check_config,omitempty"`
+	ID                int                `json:"id"`
+	ConfigRevision    string             `json:"config_revision"`
+	Name              string             `json:"name"`
+	URL               string             `json:"url"`
+	Method            string             `json:"method"`
+	ExpectedStatusMin int                `json:"expected_status_min"`
+	ExpectedStatusMax int                `json:"expected_status_max"`
+	TimeoutSec        int                `json:"timeout_sec"`
+	IntervalSec       int                `json:"interval_sec"`
 }
 
 type WebsiteProbeResult struct {
-	MonitorID       int     `json:"monitor_id"`
-	ConfigRevision  string  `json:"config_revision"`
-	OK              bool    `json:"ok"`
-	EffectiveStatus string  `json:"effective_status"`
-	EffectiveReason string  `json:"effective_reason"`
-	StatusCode      *int    `json:"status_code"`
-	RawStatusCode   *int    `json:"raw_status_code"`
-	LatencyMS       int64   `json:"latency_ms"`
-	Error           *string `json:"error"`
+	Details         *WebsiteCheckDetails `json:"details,omitempty"`
+	MonitorID       int                  `json:"monitor_id"`
+	ConfigRevision  string               `json:"config_revision"`
+	OK              bool                 `json:"ok"`
+	EffectiveStatus string               `json:"effective_status"`
+	EffectiveReason string               `json:"effective_reason"`
+	StatusCode      *int                 `json:"status_code"`
+	RawStatusCode   *int                 `json:"raw_status_code"`
+	LatencyMS       int64                `json:"latency_ms"`
+	Error           *string              `json:"error"`
 }
 
 type jsonBool bool
@@ -498,6 +500,15 @@ func main() {
 	}
 	flag.Parse()
 	applyEnvDefaults()
+	applyDiscoveryEnv()
+	if discoveryOnce {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		if err := json.NewEncoder(os.Stdout).Encode(newDiscoverySource().collect(ctx)); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	if reportInterval < int(minReportInterval/time.Second) {
 		reportInterval = int(minReportInterval / time.Second)
@@ -536,6 +547,10 @@ func main() {
 	}
 	logFilter("network include", nicInclude)
 	logFilter("network exclude", nicExclude)
+
+	if discoveryEnabled {
+		go runDiscoveryReporter(context.Background())
+	}
 
 	switch reportMode {
 	case "websocket", "ws":
@@ -1149,6 +1164,9 @@ func websiteProbeTimeout(task WebsiteProbeTask) time.Duration {
 }
 
 func probeFailureReason(err error) string {
+	if strings.Contains(strings.ToLower(err.Error()), "certificate") || strings.Contains(strings.ToLower(err.Error()), "tls") {
+		return "tls_error"
+	}
 	var networkError net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &networkError) && networkError.Timeout()) || strings.Contains(strings.ToLower(err.Error()), "timeout") {
 		return "timeout"
@@ -1197,10 +1215,15 @@ func executeWebsiteHTTPProbeWithClientContext(parent context.Context, task Websi
 		return websiteProbeError(task, time.Since(started).Milliseconds(), probeFailureReason(err))
 	}
 	defer response.Body.Close()
-	if _, err := io.Copy(io.Discard, io.LimitReader(response.Body, 512)); err != nil {
-		return websiteProbeError(task, time.Since(started).Milliseconds(), probeFailureReason(err))
+	result := normalizeWebsiteProbeHTTPResult(task, response.StatusCode, time.Since(started).Milliseconds())
+	result = applyWebsiteHTTPChecks(task, response, result)
+	if !result.Details.ContentChecked {
+		if _, err := io.Copy(io.Discard, io.LimitReader(response.Body, 512)); err != nil {
+			return websiteProbeError(task, time.Since(started).Milliseconds(), probeFailureReason(err))
+		}
 	}
-	return normalizeWebsiteProbeHTTPResult(task, response.StatusCode, time.Since(started).Milliseconds())
+	result.LatencyMS = time.Since(started).Milliseconds()
+	return result
 }
 
 func publicHTTPTransport(timeout time.Duration) *http.Transport {

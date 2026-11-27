@@ -2,13 +2,15 @@
 import { randomBytes } from 'node:crypto';
 import { basename } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { apiTarget } from './lib/cvm-api.mjs';
+import { discoverCloudflare, discoverGithub } from './lib/provider-discovery.mjs';
 
 function usage() {
   console.log(`CF VPS Monitor CLI
 
 Environment:
   CFVM_URL      Panel base URL, for example https://monitor.example.com
-  CFVM_TOKEN    ADMIN_API_TOKEN configured on the Worker
+  CFVM_TOKEN    Independent cvm_ token or legacy ADMIN_API_TOKEN
 
 Discovery:
   discover
@@ -75,6 +77,41 @@ Records / backup:
   backup export [output.json]
   backup restore <json|@file>
 
+Infrastructure / AI:
+  assets list [filters-json]
+  assets get <id>
+  assets add <json|@file>
+  assets edit <id> <json|@file>
+  assets context <id> [filters-json]
+  assets topology <id> [filters-json]
+  assets import <json|@file>
+  assets batch <json|@file>
+  assets merge <source-id> <target-id>
+  search <query>
+  discovery list [filters-json]
+  discovery runs [filters-json]
+  discovery submit <json|@file>
+  discovery cloudflare [--submit]
+  discovery github [--submit]
+  discovery resolve <id> <import|merge|ignore> [asset-id]
+  snapshots list [filters-json]
+  snapshots add <json|@file>
+  changes list [filters-json]
+  operations record <json|@file>
+  documents list [filters-json]
+  documents get <id>
+  documents add <json|@file>
+  documents edit <id> <json|@file>
+  documents versions <id>
+  documents restore <id> <version>
+  documents export <id> [output.md]
+  baselines list [filters-json]
+  baselines get <id>
+  baselines add <json|@file>
+  baselines edit <id> <json|@file>
+  baselines versions <id>
+  baselines evaluate <id> <asset-id>
+
 Generic:
   request <METHOD> <path> [json|@file]
   get <path>
@@ -95,16 +132,7 @@ Examples:
 function baseUrl() {
   const raw = String(process.env.CFVM_URL || '').trim().replace(/\/+$/, '');
   if (!raw) throw new Error('CFVM_URL is required');
-  const url = new URL(raw);
-  const local = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
-  if (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) {
-    throw new Error('CFVM_URL must use HTTPS (HTTP is allowed only for localhost)');
-  }
-  if (url.username || url.password) throw new Error('CFVM_URL must not contain credentials');
-  url.pathname = url.pathname.replace(/\/+$/, '');
-  url.search = '';
-  url.hash = '';
-  return url.toString().replace(/\/$/, '');
+  return apiTarget(raw, '/capabilities').origin;
 }
 
 function token() {
@@ -188,7 +216,7 @@ async function request(path, method = 'GET', body, { print = true } = {}) {
       payload = JSON.stringify(body);
     }
 
-    const response = await fetch(baseUrl() + apiPath(path), {
+    const response = await fetch(apiTarget(baseUrl(), apiPath(path)), {
       method: normalizedMethod,
       headers,
       body: ['GET', 'HEAD'].includes(normalizedMethod) ? undefined : payload,
@@ -215,6 +243,19 @@ async function request(path, method = 'GET', body, { print = true } = {}) {
   }
 }
 
+function resourceId(value) {
+  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error('A valid resource UUID is required');
+  return value;
+}
+
+function filteredPath(path, raw) {
+  const filters = jsonBody(raw, { required: false });
+  if (!filters || typeof filters !== 'object' || Array.isArray(filters)) throw new Error('filters must be a JSON object');
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value !== null && value !== undefined) params.set(key, Array.isArray(value) ? value.join(',') : String(value));
+  return path + (params.size ? '?' + params : '');
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const [group, action, ...rest] = args;
@@ -234,6 +275,53 @@ async function main() {
   if (group === 'capacity') return request('/capacity');
   if (group === 'logs') return request('/logs');
   if (group === 'update-check') return request('/update-check');
+
+  if (group === 'search') return request('/search?q=' + encodeURIComponent(action || ''));
+  if (group === 'assets') {
+    if (action === 'list') return request(filteredPath('/assets', rest[0]));
+    if (action === 'add') return request('/assets', 'POST', jsonBody(rest[0]));
+    if (action === 'import' || action === 'batch') return request('/assets/' + action, 'POST', jsonBody(rest[0]));
+    if (action === 'get') return request('/assets/' + resourceId(rest[0]));
+    if (action === 'edit') return request('/assets/' + resourceId(rest[0]), 'PATCH', jsonBody(rest[1]));
+    if (action === 'context' || action === 'topology') return request(filteredPath('/assets/' + resourceId(rest[0]) + '/' + action, rest[1]));
+    if (action === 'merge') return request('/assets/' + resourceId(rest[0]) + '/merge', 'POST', { target_id: resourceId(rest[1]) });
+  }
+  if (group === 'discovery') {
+    if (action === 'cloudflare' || action === 'github') {
+      if (rest.some(value => value !== '--submit')) throw new Error('Provider discovery accepts only --submit; configure credentials with environment variables');
+      const report = await (action === 'cloudflare' ? discoverCloudflare() : discoverGithub());
+      if (rest.includes('--submit')) return request('/discovery/reports', 'POST', report);
+      console.log(JSON.stringify(report, null, 2));
+      return report;
+    }
+    if (action === 'list' || action === 'runs') return request(filteredPath('/discovery/' + (action === 'list' ? 'candidates' : 'runs'), rest[0]));
+    if (action === 'submit') return request('/discovery/reports', 'POST', jsonBody(rest[0]));
+    if (action === 'resolve') {
+      if (!['import','merge','ignore'].includes(rest[1])) throw new Error('resolution must be import, merge or ignore');
+      return request('/discovery/candidates/' + resourceId(rest[0]) + '/resolve', 'POST', { action: rest[1], ...(rest[2] ? { asset_id: resourceId(rest[2]) } : {}) });
+    }
+  }
+  if (group === 'snapshots') {
+    if (action === 'list') return request(filteredPath('/configuration/snapshots', rest[0]));
+    if (action === 'add') return request('/configuration/snapshots', 'POST', jsonBody(rest[0]));
+  }
+  if (group === 'changes' && action === 'list') return request(filteredPath('/changes', rest[0]));
+  if (group === 'operations' && action === 'record') return request('/operations', 'POST', jsonBody(rest[0]));
+  if (group === 'documents' || group === 'baselines') {
+    const prefix = '/' + group;
+    if (action === 'list') return request(filteredPath(prefix, rest[0]));
+    if (action === 'add') return request(prefix, 'POST', jsonBody(rest[0]));
+    if (action === 'get') return request(prefix + '/' + resourceId(rest[0]));
+    if (action === 'edit') return request(prefix + '/' + resourceId(rest[0]), 'PATCH', jsonBody(rest[1]));
+    if (action === 'versions') return request(prefix + '/' + resourceId(rest[0]) + '/versions');
+    if (group === 'baselines' && action === 'evaluate') return request(prefix + '/' + resourceId(rest[0]) + '/evaluate', 'POST', { asset_id: resourceId(rest[1]) });
+    if (group === 'documents' && action === 'restore') return request(prefix + '/' + resourceId(rest[0]) + '/restore', 'POST', { version: positiveInteger(rest[1], 'version') });
+    if (group === 'documents' && action === 'export') {
+      const value = await request(prefix + '/' + resourceId(rest[0]) + '/export', 'GET', undefined, { print: !rest[1] });
+      if (rest[1]) { writeFileSync(rest[1], typeof value === 'string' ? value : JSON.stringify(value, null, 2), { mode: 0o600 }); console.log('Document written to ' + rest[1]); }
+      return;
+    }
+  }
 
   if (group === 'maintenance' && action === 'cleanup') {
     return request('/maintenance/cleanup', 'POST', jsonBody(rest[0], { required: false }));

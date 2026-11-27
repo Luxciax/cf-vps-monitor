@@ -352,6 +352,40 @@ adminThemeRoutes.post('/settings', async (c) => {
   return c.json({ success: true });
 });
 
+// Preview uses the same validator and CSS builder as saving, without writing
+// theme settings or creating a built-in theme record on first use.
+adminThemeRoutes.post('/preview', async (c) => {
+  const parsed = await readJsonObject(c);
+  if ('response' in parsed) return parsed.response;
+  const short = normalizeActiveTheme(typeof parsed.body.short === 'string' ? parsed.body.short.trim() : '');
+  if (!/^[A-Za-z0-9_-]+$/.test(short)) return c.json({ error: '主题 ID 无效' }, 400);
+  if (parsed.body.custom_css !== undefined && typeof parsed.body.custom_css !== 'string') {
+    return c.json({ error: '自定义 CSS 必须是字符串' }, 400);
+  }
+  const customCss = typeof parsed.body.custom_css === 'string' ? parsed.body.custom_css : '';
+  if (new TextEncoder().encode(customCss).byteLength > MAX_THEME_CUSTOM_CSS_BYTES) {
+    return c.json({ error: `自定义 CSS 不能超过 ${MAX_THEME_CUSTOM_CSS_BYTES} 字节` }, 413);
+  }
+  const database = getDatabase(c.env);
+  const theme = await db.getTheme(database, short) || (isBuiltinTheme(short) ? builtinThemeRecord(short) : null);
+  if (!theme) return c.json({ error: '主题不存在' }, 404);
+  const manifest = withDashboardBackgroundConfiguration(normalizeThemeManifest(JSON.parse(theme.manifest_json)));
+  const config = validateThemeConfig(manifest, parsed.body.config);
+  if (!config.ok) return c.json({ error: config.error }, 400);
+  const asset = isBuiltinTheme(short) ? null : await db.getThemeAsset(database, short, theme.style_path);
+  if (!asset && !isBuiltinTheme(short)) return c.json({ error: '主题样式资源不存在' }, 404);
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({
+    short,
+    config: config.config,
+    css: buildThemeCss({
+      styleCss: asset ? new TextDecoder().decode(base64ToBytes(asset.content_base64)) : '',
+      config: config.config,
+      customCss,
+    }),
+  });
+});
+
 adminThemeRoutes.post('/delete', async (c) => {
   const parsed = await readJsonObject(c);
   if ('response' in parsed) return parsed.response;

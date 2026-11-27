@@ -48,7 +48,7 @@ test('R-D02 actual setup preserves explicit choices on same checksum and changed
     });
     const { applyBundledMigrations } = loader.load('worker/src/routes/setup.ts');
     const apply = () => applyBundledMigrations('synthetic-project', 'synthetic-management-token');
-    assert.equal((await apply()).applied, 8);
+    assert.equal((await apply()).applied, 14, 'initial setup must apply the eight legacy and six infrastructure migrations');
     const site = await rpc(sql, 'cfm_create_website_monitor', { input_monitor: {
       name: 'Synthetic', url: 'https://site.audit.example.com', ...disabledProbe,
     } });

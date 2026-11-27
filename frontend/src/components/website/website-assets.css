@@ -836,3 +836,40 @@
     transition: none;
   }
 }
+
+/* The clean Monitor view uses opaque surfaces and readable theme-aware detail. */
+html[data-monitor-theme='monitor'] .website-asset-dashboard.has-no-dashboard-background .website-asset-card {
+  min-height: 246px;
+  gap: 12px;
+  background: var(--monitor-panel);
+  border-color: var(--monitor-border);
+  box-shadow: var(--monitor-shadow);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-monitor-theme='monitor'] .website-asset-dashboard.has-no-dashboard-background .website-asset-card:hover {
+  transform: none;
+  border-color: var(--monitor-border-strong);
+  box-shadow: var(--monitor-shadow-hover);
+}
+.website-asset-dashboard.has-no-dashboard-background .website-asset-icon {
+  color: var(--gray-11);
+  background: var(--gray-3);
+  border-color: var(--gray-6);
+}
+.website-asset-dashboard.has-no-dashboard-background .website-asset-title-row svg,
+.website-asset-dashboard.has-no-dashboard-background .website-asset-meta svg,
+.website-asset-dashboard.has-no-dashboard-background .website-asset-meta span,
+.website-asset-dashboard.has-no-dashboard-background .website-asset-domain,
+.website-asset-dashboard.has-no-dashboard-background .website-asset-heartbeat-caption,
+.website-asset-dashboard.has-no-dashboard-background .website-asset-loading {
+  color: var(--gray-11);
+}
+.website-asset-dashboard.has-no-dashboard-background .website-asset-heartbeat-caption { font-size: 10px; }
+.website-asset-dashboard.has-no-dashboard-background .website-asset-heartbeat { border-top-color: var(--gray-5); }
+.website-asset-dashboard.has-no-dashboard-background .website-asset-tags span { color: var(--gray-11); background: var(--gray-3); border-color: var(--gray-5); }
+.website-asset-dashboard.has-no-dashboard-background .website-asset-empty { color: var(--gray-11); background: var(--gray-2); border-color: var(--gray-6); backdrop-filter: none; }
+.website-asset-dashboard.has-no-dashboard-background .website-asset-empty strong { color: var(--gray-12); }
+@media (max-width: 760px) {
+  html[data-monitor-theme='monitor'] .website-asset-dashboard.has-no-dashboard-background .website-asset-card { min-height: 236px; }
+}

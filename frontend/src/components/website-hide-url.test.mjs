@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { productionDeclaration } from '../../test/helpers/production-module.mjs';
+import { productionDeclaration, productionModule } from '../../test/helpers/production-module.mjs';
 
 const list = await readFile(new URL('./WebsiteMonitorList.tsx', import.meta.url), 'utf8');
 const card = await readFile(new URL('./website/WebsiteAssetCard.tsx', import.meta.url), 'utf8');
@@ -12,6 +12,7 @@ const adminWebsites = await readFile(new URL('../pages/admin/Websites.tsx', impo
 assert.match(list, /url: string \| null;/, 'WebsiteMonitorSummary.url 必须是 string | null');
 const normalizeWebsiteSummary = productionDeclaration('src/pages/Index.tsx', 'normalizeWebsiteSummary', {
   readWebsiteHidden: productionDeclaration('src/pages/Index.tsx', 'readWebsiteHidden'),
+  ...productionModule('src/utils/websiteHealth.ts'),
 });
 assert.equal(normalizeWebsiteSummary({ id: 1, url: null }).url, null,
   '归一化必须保留公开 API 的 null 网址');
